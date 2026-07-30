@@ -24,7 +24,9 @@ import dev.tamboui.widgets.block.Block;
  * <p>
  * The top series renders as bars growing <em>upward</em> from the centre; the bottom series renders as bars growing
  * <em>downward</em> from the centre. Sub-pixel resolution is achieved using Unicode block characters (▁▂▃▄▅▆▇█), giving
- * smooth visual gradation within a single character row. This layout matches the style of macOS Activity Monitor's
+ * smooth visual gradation within a single character row. Because Unicode has no top-anchored eighth blocks, partial
+ * cells of the bottom series are drawn as the complement block glyph in inverse video, which yields the same
+ * eighth-level resolution as the top series. This layout matches the style of macOS Activity Monitor's
  * network and disk activity graphs.
  * <p>
  * Example usage:
@@ -112,7 +114,6 @@ public final class DualSparkline implements Widget {
     private final Long max;
     private final Block block;
     private final Sparkline.BarSet barSet;
-    private final Sparkline.BarSet reversedBarSet;
     private final Sparkline.RenderDirection direction;
     private final boolean showYAxis;
     private final LongFunction<String> yAxisFormatter;
@@ -124,7 +125,6 @@ public final class DualSparkline implements Widget {
         this.max = builder.max;
         this.block = builder.block;
         this.barSet = builder.barSet;
-        this.reversedBarSet = builder.barSet.reversed();
         this.direction = builder.direction;
         this.showYAxis = builder.showYAxis;
         this.yAxisFormatter = builder.yAxisFormatter;
@@ -287,19 +287,24 @@ public final class DualSparkline implements Widget {
                     style = DIM;
                 } else if (r >= bottomStart && r < bottomStart + bottomHalfH) {
                     // Bottom series: bars grow downward from the centre.
-                    // Uses reversed bar set so partial cells fill from the top,
-                    // connecting smoothly to full blocks above.
+                    // Unicode has no top-anchored eighth blocks (only ▔, ▀ and █), so a
+                    // partial cell is drawn as the complement glyph — the part of the
+                    // cell NOT covered by the bar — in inverse video: the glyph area
+                    // takes the cell background and the remainder takes the bar colour,
+                    // giving the same eighth-level resolution as the top series.
                     int rowOffset = r - bottomStart; // 0 at row nearest centre
                     long barPx = botVal * bottomHalfH * 8 / effectiveMax;
                     long threshold = (long) rowOffset * 8;
                     if (barPx >= threshold + 8) {
-                        ch = reversedBarSet.full();
+                        ch = barSet.full();
+                        style = bottomStyle;
                     } else if (barPx > threshold) {
-                        ch = reversedBarSet.symbolForLevel((double) (barPx - threshold) / 8.0);
+                        ch = barSet.symbolForLevel(1.0 - (double) (barPx - threshold) / 8.0);
+                        style = bottomStyle.reversed();
                     } else {
-                        ch = reversedBarSet.empty();
+                        ch = barSet.empty();
+                        style = bottomStyle;
                     }
-                    style = bottomStyle;
                 } else {
                     // Spare row (even height) — empty
                     ch = barSet.empty();
