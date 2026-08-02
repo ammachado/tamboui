@@ -72,24 +72,44 @@ public final class BackendFactory {
      * explicitly specified providers and auto-discovered ones.
      *
      * @return a new backend instance
-     * @throws IOException           if backend creation fails
-     * @throws IllegalStateException if no provider is found or all providers fail
+     * @throws IOException      if backend creation fails
+     * @throws BackendException if no provider is found or all providers fail
      */
     public static Backend create() throws IOException {
+        return create((ClassLoader) null);
+    }
+
+    /**
+     * Creates a new backend instance, discovering providers using the given classloader.
+     * <p>
+     * Behaves like {@link #create()}, except that backend discovery uses {@code classLoader}
+     * exclusively when it is non-null (deterministic for embedders that bundle the backend in a
+     * known classloader). When {@code classLoader} is null, discovery falls back to the default
+     * candidate classloaders (see {@link SafeServiceLoader#load(Class, ClassLoader, java.util.function.Consumer)}).
+     *
+     * @param classLoader the classloader to use exclusively for discovery, or null for the default
+     * @return a new backend instance
+     * @throws IOException      if backend creation fails
+     * @throws BackendException if no provider is found or all providers fail
+     */
+    public static Backend create(ClassLoader classLoader) throws IOException {
         // Check system property first, then environment variable
         String userSelectedProvider = System.getProperty("tamboui.backend");
         if (userSelectedProvider == null || userSelectedProvider.isEmpty()) {
             userSelectedProvider = System.getenv("TAMBOUI_BACKEND");
         }
 
-        // Load all available providers
-        List<BackendProvider> allProviders = SafeServiceLoader.load(BackendProvider.class);
+        // Load all available providers, capturing any that fail to instantiate so that a present
+        // but broken backend is not mistaken for an absent one.
+        List<Throwable> loadFailures = new ArrayList<>();
+        List<BackendProvider> allProviders =
+                SafeServiceLoader.load(BackendProvider.class, classLoader, loadFailures::add);
 
         List<BackendProvider> providers = (userSelectedProvider != null && !userSelectedProvider.isEmpty())
-                ? resolveProviders(userSelectedProvider, allProviders)
+                ? resolveProviders(userSelectedProvider, allProviders, loadFailures)
                 : allProviders;
 
-        Backend backend = tryProviders(providers);
+        Backend backend = tryProviders(providers, loadFailures);
 
         // Check if recording is enabled and wrap the backend
         RecordingConfig recordingConfig = RecordingConfig.load();
@@ -107,11 +127,13 @@ public final class BackendFactory {
      * entries in the comma-separated list can act as fallbacks.
      *
      * @param providerSpec the provider specification (may be comma-separated)
-     * @param allProviders all available providers from ServiceLoader
+     * @param allProviders all successfully instantiated providers from ServiceLoader
+     * @param loadFailures errors raised while discovering/instantiating providers (may be empty)
      * @return list of matching providers in the specified order
-     * @throws BackendException if none of the specified providers were found
+     * @throws BackendException if none of the specified providers were usable
      */
-    private static List<BackendProvider> resolveProviders(String providerSpec, List<BackendProvider> allProviders) {
+    private static List<BackendProvider> resolveProviders(
+            String providerSpec, List<BackendProvider> allProviders, List<Throwable> loadFailures) {
         List<BackendProvider> resolved = new ArrayList<>();
         for (String spec : providerSpec.split(",")) {
             String trimmedSpec = spec.trim();
@@ -125,6 +147,14 @@ public final class BackendFactory {
                     .ifPresent(resolved::add);
         }
         if (resolved.isEmpty()) {
+            // A requested provider can be missing because it is absent, or because it is
+            // present on the classpath but failed to initialize. Only blame broken
+            // providers when there are no usable ones at all; otherwise an unrelated
+            // failure would wrongly claim that "none could be initialized" even though a
+            // working provider was discovered (the requested name is simply absent).
+            if (!loadFailures.isEmpty() && allProviders.isEmpty()) {
+                throw brokenProvidersException(loadFailures);
+            }
             throw new BackendException(
                     "No BackendProvider found on classpath for any of the specified providers: '" + providerSpec + "'.\n"
                             + "Available providers: " + formatAvailableProviders(allProviders) + "\n"
@@ -136,12 +166,16 @@ public final class BackendFactory {
     /**
      * Tries each provider in order until one successfully creates a backend.
      *
-     * @param providers the providers to try
+     * @param providers    the providers to try
+     * @param loadFailures errors raised while discovering/instantiating providers (may be empty)
      * @return a new backend instance
-     * @throws IllegalStateException if no provider succeeds
+     * @throws BackendException if no provider succeeds
      */
-    private static Backend tryProviders(List<BackendProvider> providers) {
+    private static Backend tryProviders(List<BackendProvider> providers, List<Throwable> loadFailures) {
         if (providers.isEmpty()) {
+            if (!loadFailures.isEmpty()) {
+                throw brokenProvidersException(loadFailures);
+            }
             throw new BackendException(
                     "No BackendProvider found on classpath.\n" +
                             "Add a backend dependency such as tamboui-jline3-backend or tamboui-panama-backend."
@@ -165,6 +199,29 @@ public final class BackendFactory {
                         "Tried: " + formatAvailableProviders(providers) + "\n" +
                         "Errors:\n" + errors
         );
+    }
+
+    /**
+     * Builds the exception describing providers that were discovered on the classpath but failed
+     * to initialize, attaching the first failure as the cause and any remaining failures as
+     * suppressed exceptions so their full stack traces are preserved for diagnostics.
+     *
+     * @param loadFailures the non-empty list of discovery/instantiation failures
+     * @return a {@link BackendException} reporting the failures
+     */
+    private static BackendException brokenProvidersException(List<Throwable> loadFailures) {
+        String detail = loadFailures.stream()
+                .map(t -> "  " + t.getMessage())
+                .collect(Collectors.joining("\n"));
+        BackendException exception = new BackendException(
+                "Found " + loadFailures.size() + " BackendProvider(s) on the classpath but none "
+                        + "could be initialized (see cause).\nFailures:\n" + detail,
+                loadFailures.get(0)
+        );
+        for (int i = 1; i < loadFailures.size(); i++) {
+            exception.addSuppressed(loadFailures.get(i));
+        }
+        return exception;
     }
 
     /**
