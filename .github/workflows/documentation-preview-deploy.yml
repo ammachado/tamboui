@@ -1,0 +1,130 @@
+name: Deploy documentation preview
+
+# SECURITY: This workflow has write access and must stay separate from the build.
+# Never checkout a pull request ref or execute files from the downloaded artifact.
+on:
+  workflow_run:
+    workflows: [Build documentation preview]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+  pull-requests: write
+
+jobs:
+  deploy:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.pull_requests[0].number != null
+    concurrency:
+      group: documentation-preview-${{ github.event.workflow_run.pull_requests[0].number }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    env:
+      PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+    steps:
+      # The deployment action needs a Git repository; checkout only the trusted default branch.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Check pull request state
+        id: pull-request
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const pull = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: Number(process.env.PR_NUMBER)
+            });
+            core.setOutput('open', pull.data.state === 'open');
+      - uses: actions/download-artifact@v8
+        if: steps.pull-request.outputs.open == 'true'
+        with:
+          name: documentation-preview
+          path: documentation-preview
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Publish preview
+        if: steps.pull-request.outputs.open == 'true'
+        id: preview
+        uses: rossjrw/pr-preview-action@ffa7509e91a3ec8dfc2e5536c4d5c1acdf7a6de9 # v1.8.1
+        with:
+          action: deploy
+          comment: false
+          pr-number: ${{ env.PR_NUMBER }}
+          qr-code: false
+          source-dir: documentation-preview
+          wait-for-pages-deployment: true
+      - name: Add preview link to pull request
+        if: steps.pull-request.outputs.open == 'true'
+        uses: actions/github-script@v8
+        env:
+          PREVIEW_URL: ${{ steps.preview.outputs.preview-url }}
+        with:
+          script: |
+            const marker = '<!-- documentation-preview -->';
+            const issue_number = Number(process.env.PR_NUMBER);
+            const previewUrl = process.env.PREVIEW_URL;
+            // Link significant rendered documentation changes and every affected demo without
+            // running a second build or executing any files from the untrusted artifact.
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              ...context.repo,
+              pull_number: issue_number
+            });
+            const newDemos = new Set(files.flatMap(file => {
+              const match = file.filename.match(/^(?:[^/]+\/)?demos\/([a-z0-9-]+)\/build\.gradle(?:\.kts)?$/);
+              return file.status === 'added' && match ? [match[1]] : [];
+            }));
+            const entries = new Map();
+            for (const file of files) {
+              const page = file.filename.match(/^docs\/src\/docs\/asciidoc\/([a-z0-9-]+)\.adoc$/);
+              if (page && (file.status === 'added' || file.changes >= 20)) {
+                const icon = file.status === 'added' ? '🆕' : '✏️';
+                entries.set(`page:${page[1]}`,
+                  `${icon} [${page[1]}](${previewUrl}${page[1]}.html)`);
+              }
+
+              const demo = file.filename.match(/^(?:[^/]+\/)?demos\/([a-z0-9-]+)\//);
+              if (demo) {
+                const icon = newDemos.has(demo[1]) ? '🆕' : '🎬';
+                entries.set(`demo:${demo[1]}`,
+                  `${icon} Demo: [${demo[1]}](${previewUrl}demos.html)`);
+              }
+
+              const tape = file.filename.match(/^docs\/video\/([a-z0-9-]+)\.tape$/);
+              if (tape) {
+                const icon = newDemos.has(tape[1]) ? '🆕' : '🎬';
+                entries.set(`demo:${tape[1]}`,
+                  `${icon} Recording: [${tape[1]}](${previewUrl}demos.html)`);
+              }
+            }
+            const changed = [...entries.values()];
+            const visible = changed.slice(0, 10);
+            const overflow = changed.length > 10 ? `\n- …and ${changed.length - 10} more` : '';
+            const changes = visible.length
+              ? `\n\n### Changed pages and demos\n- ${visible.join('\n- ')}${overflow}`
+              : '';
+            const qrCode = `https://qr.rossjrw.com/?color.dark=0d1117&url=${encodeURIComponent(previewUrl)}`;
+            const body = `${marker}\n📖 Documentation preview: ${previewUrl}${changes}\n\n![QR code](${qrCode})`;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo,
+              issue_number
+            });
+            const existing = comments.find(comment =>
+              comment.user.type === 'Bot' && comment.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number,
+                body
+              });
+            }

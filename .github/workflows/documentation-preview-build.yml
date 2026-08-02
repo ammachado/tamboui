@@ -1,0 +1,38 @@
+name: Build documentation preview
+
+# SECURITY: This workflow executes untrusted pull request code, including forks.
+# Keep it read-only: do not add secrets, write permissions, or persisted credentials.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+concurrency:
+  group: documentation-preview-build-${{ github.event.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          distribution: graalvm-community
+          java-version: '25'
+          github-token: ${{ github.token }}
+      - uses: gradle/actions/wrapper-validation@v5
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          cache-disabled: true
+      - name: Build documentation
+        run: ./gradlew -q :docs:asciidoctor
+      - uses: actions/upload-artifact@v6
+        with:
+          name: documentation-preview
+          path: docs/build/docs
+          retention-days: 3
