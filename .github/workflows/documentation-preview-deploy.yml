@@ -13,17 +13,38 @@ permissions:
   pull-requests: write
 
 jobs:
-  deploy:
+  resolve-pull-request:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.pull_requests[0].number != null
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      number: ${{ steps.pull-request.outputs.number }}
+    steps:
+      - name: Find open pull request
+        id: pull-request
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const head = `${run.head_repository.owner.login}:${run.head_branch}`;
+            const pulls = await github.paginate(github.rest.pulls.list, {
+              ...context.repo,
+              state: 'open',
+              head
+            });
+            const pull = pulls.find(candidate => candidate.head.sha === run.head_sha);
+            core.setOutput('number', pull ? pull.number : '');
+
+  deploy:
+    needs: resolve-pull-request
+    if: needs.resolve-pull-request.outputs.number != ''
     concurrency:
-      group: documentation-preview-${{ github.event.workflow_run.pull_requests[0].number }}
-      cancel-in-progress: true
+      group: documentation-preview-${{ needs.resolve-pull-request.outputs.number }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     env:
-      PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+      PR_NUMBER: ${{ needs.resolve-pull-request.outputs.number }}
     steps:
       # The deployment action needs a Git repository; checkout only the trusted default branch.
       - uses: actions/checkout@v6
