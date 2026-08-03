@@ -251,19 +251,24 @@ class DualSparklineTest {
     @Test
     @DisplayName("THREE_LEVELS bar set uses coarser symbols")
     void withThreeLevelsBarSet() {
-        // With THREE_LEVELS, 6/8=0.75 → "█" (not "▆" as in NINE_LEVELS)
+        // With THREE_LEVELS, 3/8 → "▄" and 6/8=0.75 → "█" (not "▃"/"▆" as in
+        // NINE_LEVELS). The bottom series quantizes identically to the top:
+        // 6/8 collapses to a full cell (no inverse video) and 3/8 renders as
+        // the complement of the effective half level ("▄" in inverse video).
         DualSparkline chart = DualSparkline.builder()
-                .topData(0, 6, 8)
-                .bottomData(0, 6, 8)
+                .topData(0, 3, 6, 8)
+                .bottomData(0, 3, 6, 8)
                 .barSet(Sparkline.BarSet.THREE_LEVELS)
                 .showYAxis(false)
                 .build();
-        Rect area = new Rect(0, 0, 3, 3);
+        Rect area = new Rect(0, 0, 4, 3);
         Buffer buffer = Buffer.empty(area);
 
         chart.render(area, buffer);
 
-        assertThat(buffer).hasContent(" ██", "───", " ▄█");
+        assertThat(buffer).hasContent(" ▄██", "────", " ▄██");
+        assertThat(buffer).hasStyleAt(1, 2, Style.EMPTY.reversed());
+        assertThat(buffer).hasStyleAt(2, 2, Style.EMPTY);
     }
 
     @Test

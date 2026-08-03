@@ -6,6 +6,7 @@ package dev.tamboui.widgets.sparkline;
 
 import java.util.List;
 import java.util.function.LongFunction;
+import java.util.stream.IntStream;
 
 import dev.tamboui.buffer.Buffer;
 import dev.tamboui.layout.Rect;
@@ -299,8 +300,18 @@ public final class DualSparkline implements Widget {
                         ch = barSet.full();
                         style = bottomStyle;
                     } else if (barPx > threshold) {
-                        ch = barSet.symbolForLevel(1.0 - (double) (barPx - threshold) / 8.0);
-                        style = bottomStyle.reversed();
+                        // Complement the effective level of the symbol the top series
+                        // would draw, not the raw pixel fraction, so coarse bar sets
+                        // (e.g. THREE_LEVELS, where several eighths share a symbol)
+                        // quantize identically on both halves.
+                        int eighths = effectiveEighths(barSet, (int) (barPx - threshold));
+                        if (eighths == 8) {
+                            ch = barSet.full();
+                            style = bottomStyle;
+                        } else {
+                            ch = barSet.symbolForLevel((8 - eighths) / 8.0);
+                            style = bottomStyle.reversed();
+                        }
                     } else {
                         ch = barSet.empty();
                         style = bottomStyle;
@@ -339,6 +350,18 @@ public final class DualSparkline implements Widget {
                 }
             }
         }
+    }
+
+    /**
+     * Returns the highest canonical eighth level (1-8) that the bar set maps to the
+     * same symbol as the given level — the fill actually represented on screen.
+     */
+    private static int effectiveEighths(Sparkline.BarSet barSet, int eighths) {
+        String symbol = barSet.symbolForLevel(eighths / 8.0);
+        return IntStream.rangeClosed(eighths, 8)
+                .filter(k -> barSet.symbolForLevel(k / 8.0).equals(symbol))
+                .max()
+                .orElse(eighths);
     }
 
     private long computeMax() {
