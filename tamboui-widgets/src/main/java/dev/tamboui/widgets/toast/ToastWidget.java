@@ -9,25 +9,15 @@ import dev.tamboui.buffer.Cell;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Style;
 import dev.tamboui.text.CharWidth;
+import dev.tamboui.text.Line;
 import dev.tamboui.widget.Widget;
 import dev.tamboui.widgets.block.Block;
+import dev.tamboui.widgets.gauge.Gauge;
 
 /**
  * Stateless widget that paints one toast from an immutable {@link ToastRenderSnapshot}.
  */
 public final class ToastWidget implements Widget {
-
-    private static final String[] UNICODE_BLOCKS = {
-        " ",
-        "▏",
-        "▎",
-        "▍",
-        "▌",
-        "▋",
-        "▊",
-        "▉",
-        "█"
-    };
 
     /** Shared renderer instance for snapshot-driven painting. */
     public static final ToastWidget INSTANCE = new ToastWidget();
@@ -128,7 +118,8 @@ public final class ToastWidget implements Widget {
     }
 
     private static void renderTitleRow(Buffer buffer, Rect contentArea, int row, ToastRenderSnapshot snapshot) {
-        String text = titleBandText(snapshot);
+        // Clamp to the content width so a long title cannot overflow past the toast into adjacent UI.
+        String text = CharWidth.substringByWidth(titleBandText(snapshot), contentArea.width());
         int textWidth = CharWidth.of(text);
         int x = contentArea.left();
 
@@ -185,20 +176,14 @@ public final class ToastWidget implements Widget {
 
     private static void renderFullBlockProgress(
             Buffer buffer, int x, int y, int width, double fraction, Style style) {
-        double filledWidth = width * fraction;
-        int fullCells = (int) filledWidth;
-
-        for (int col = 0; col < fullCells && col < width; col++) {
-            buffer.set(x + col, y, new Cell(UNICODE_BLOCKS[8], style));
-        }
-
-        if (fullCells < width) {
-            double fractional = filledWidth - fullCells;
-            int blockIndex = (int) (fractional * 8);
-            if (blockIndex > 0) {
-                buffer.set(x + fullCells, y, new Cell(UNICODE_BLOCKS[blockIndex], style));
-            }
-        }
+        // Reuse the shared Gauge widget, which paints the same 1/8-precision unicode block bar.
+        // An empty label suppresses Gauge's default percent readout.
+        Gauge.builder()
+                .ratio(fraction)
+                .gaugeStyle(style)
+                .label(Line.empty())
+                .build()
+                .render(new Rect(x, y, width, 1), buffer);
     }
 
     private static void renderHalfBlockProgress(

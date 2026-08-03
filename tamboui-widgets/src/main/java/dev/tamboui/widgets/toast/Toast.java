@@ -28,7 +28,7 @@ public final class Toast {
     private final TitleAlignment titleAlignment;
     private final boolean highlightTitle;
     private final ProgressStyle progressStyle;
-    private final String dedupKey;
+    private final String deduplicationKey;
 
     Toast(ToastBuilder builder) {
         Objects.requireNonNull(builder.type, "type");
@@ -45,13 +45,11 @@ public final class Toast {
         if (builder.sticky) {
             this.lifetime = null;
         } else {
-            if (builder.lifetime == null) {
-                throw new IllegalArgumentException("timed toast requires a positive duration");
-            }
-            if (builder.lifetime.isZero() || builder.lifetime.isNegative()) {
+            Duration resolved = builder.lifetime != null ? builder.lifetime : ToastBuilder.DEFAULT_DURATION;
+            if (resolved.isZero() || resolved.isNegative()) {
                 throw new IllegalArgumentException("lifetime must be positive");
             }
-            this.lifetime = builder.lifetime;
+            this.lifetime = resolved;
         }
         this.backgroundColor = builder.backgroundColor;
         this.titleLayout = builder.titleLayout;
@@ -59,9 +57,7 @@ public final class Toast {
         this.titleAlignment = builder.titleAlignment;
         this.highlightTitle = builder.highlightTitle;
         this.progressStyle = builder.progressStyle;
-        this.dedupKey = builder.dedupKey != null
-                ? builder.dedupKey
-                : Integer.toHexString(Objects.hash(type, title, message));
+        this.deduplicationKey = builder.deduplicationKey;
     }
 
     /**
@@ -164,11 +160,14 @@ public final class Toast {
     }
 
     /**
-     * Returns the deduplication key for queue management.
+     * Returns the deduplication key, or {@code null} when this toast is not deduplicated.
+     * <p>
+     * The engine merges a newly shown toast into an existing one only when both carry the same
+     * non-null key, so deduplication is opt-in per toast.
      *
-     * @return the dedup key
+     * @return the deduplication key, or {@code null}
      */
-    public String dedupKey() {
-        return dedupKey;
+    public String deduplicationKey() {
+        return deduplicationKey;
     }
 }

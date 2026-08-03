@@ -25,6 +25,9 @@ import dev.tamboui.style.Color;
  */
 public final class ToastBuilder {
 
+    /** Default auto-dismiss lifetime applied to timed toasts that do not set an explicit duration. */
+    public static final Duration DEFAULT_DURATION = Duration.ofSeconds(5);
+
     ToastType type;
     String title;
     String message;
@@ -36,7 +39,7 @@ public final class ToastBuilder {
     TitleAlignment titleAlignment = TitleAlignment.START;
     boolean highlightTitle;
     ProgressStyle progressStyle = ProgressStyle.FULL_BLOCK;
-    String dedupKey;
+    String deduplicationKey;
 
     private ToastBuilder() {
     }
@@ -139,6 +142,7 @@ public final class ToastBuilder {
     /**
      * Sets the auto-dismiss lifetime for a timed toast.
      * <p>
+     * Optional: a timed toast that never sets a duration uses {@link #DEFAULT_DURATION}.
      * Mutually exclusive with {@link #sticky(boolean)} when {@code sticky} is {@code true}.
      *
      * @param duration the positive lifetime
@@ -218,13 +222,15 @@ public final class ToastBuilder {
     /**
      * Sets the deduplication key used by the toast engine.
      * <p>
-     * When not set, defaults to a hash of type, title, and message.
+     * Deduplication is opt-in: when left unset (the default), the toast is never merged with another.
+     * When two toasts share the same key, showing the second merges into the first instead of
+     * enqueuing a duplicate.
      *
-     * @param dedupKey the dedup key
+     * @param deduplicationKey the deduplication key, or {@code null} to disable deduplication
      * @return this builder
      */
-    public ToastBuilder dedupKey(String dedupKey) {
-        this.dedupKey = dedupKey;
+    public ToastBuilder deduplicationKey(String deduplicationKey) {
+        this.deduplicationKey = deduplicationKey;
         return this;
     }
 

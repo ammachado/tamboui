@@ -5,7 +5,6 @@
 package dev.tamboui.widgets.toast;
 
 import java.time.Duration;
-import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.DisplayName;
@@ -14,11 +13,6 @@ import org.junit.jupiter.api.Test;
 import dev.tamboui.buffer.Buffer;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.terminal.Frame;
-import dev.tamboui.tui.bindings.BindingSets;
-import dev.tamboui.tui.bindings.KeyTrigger;
-import dev.tamboui.tui.event.KeyEvent;
-import dev.tamboui.tui.event.MouseButton;
-import dev.tamboui.tui.event.MouseEvent;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -30,28 +24,32 @@ class ToastEngineInteractTest {
     }
 
     @Test
-    @DisplayName("left click dismisses matching toast")
-    void leftClickDismissesMatchingToast() {
+    @DisplayName("toastIdAt returns the id under the point so the host can dismiss it")
+    void toastIdAtHitDismisses() {
         ToastEngine engine = ToastEngine.builder().build();
         String id = engine.show(ToastBuilder.info("Click me").duration(Duration.ofSeconds(5)).build());
 
         Rect toastRect = renderSingleToastAndGetRect(engine, new Rect(0, 0, 50, 12));
-        MouseEvent click = MouseEvent.press(
-                MouseButton.LEFT,
-                toastRect.x() + 1,
-                toastRect.y() + 1,
-                BindingSets.defaults());
+        String hit = engine.toastIdAt(toastRect.x() + 1, toastRect.y() + 1);
 
-        ToastInteraction result = engine.interact(click);
-
-        assertThat(result).isInstanceOf(ToastInteraction.Dismissed.class);
-        assertThat(((ToastInteraction.Dismissed) result).id()).isEqualTo(id);
+        assertThat(hit).isEqualTo(id);
+        engine.dismiss(hit);
         assertThat(engine.visibleCount()).isZero();
     }
 
     @Test
-    @DisplayName("right click requests copy using title and message")
-    void rightClickRequestsCopyUsingTitleAndMessage() {
+    @DisplayName("toastIdAt returns null outside any toast rectangle")
+    void toastIdAtMissReturnsNull() {
+        ToastEngine engine = ToastEngine.builder().build();
+        engine.show(ToastBuilder.info("Click me").duration(Duration.ofSeconds(5)).build());
+        renderSingleToastAndGetRect(engine, new Rect(0, 0, 50, 12));
+
+        assertThat(engine.toastIdAt(0, 0)).isNull();
+    }
+
+    @Test
+    @DisplayName("requestCopy returns title and message and notifies the copy handler")
+    void requestCopyReturnsTextAndNotifiesHandler() {
         AtomicReference<String> copied = new AtomicReference<String>();
         ToastEngine engine = ToastEngine.builder()
                 .onCopyRequested((toastId, text) -> copied.set(text))
@@ -61,66 +59,39 @@ class ToastEngineInteractTest {
                 .duration(Duration.ofSeconds(5))
                 .build());
 
-        Rect toastRect = renderSingleToastAndGetRect(engine, new Rect(0, 0, 50, 12));
-        MouseEvent rightClick = MouseEvent.press(
-                MouseButton.RIGHT,
-                toastRect.x() + 1,
-                toastRect.y() + 1,
-                BindingSets.defaults());
+        String text = engine.requestCopy(id);
 
-        ToastInteraction result = engine.interact(rightClick);
-
-        assertThat(result).isInstanceOf(ToastInteraction.CopyRequested.class);
-        ToastInteraction.CopyRequested copyRequested = (ToastInteraction.CopyRequested) result;
-        assertThat(copyRequested.id()).isEqualTo(id);
-        assertThat(copyRequested.text()).isEqualTo("Failure\nBoom");
+        assertThat(text).isEqualTo("Failure\nBoom");
         assertThat(copied.get()).isEqualTo("Failure\nBoom");
         assertThat(engine.visibleCount()).isEqualTo(1);
     }
 
     @Test
-    @DisplayName("keyboard shortcut dismisses top toast")
-    void keyboardShortcutDismissesTopToast() {
-        ToastEngine engine = ToastEngine.builder()
-                .shortcut(ToastShortcut.of(KeyTrigger.ch('d'), ToastShortcut.Action.DISMISS_TOP))
-                .build();
+    @DisplayName("requestCopy returns null for an unknown id")
+    void requestCopyUnknownIdReturnsNull() {
+        ToastEngine engine = ToastEngine.builder().build();
+        engine.show(ToastBuilder.info("one").duration(Duration.ofSeconds(5)).build());
+
+        assertThat(engine.requestCopy("does-not-exist")).isNull();
+    }
+
+    @Test
+    @DisplayName("dismissTop removes the most recent toast and returns its id")
+    void dismissTopRemovesMostRecent() {
+        ToastEngine engine = ToastEngine.builder().build();
         String first = engine.show(ToastBuilder.info("one").duration(Duration.ofSeconds(5)).build());
         String second = engine.show(ToastBuilder.info("two").duration(Duration.ofSeconds(5)).build());
 
-        ToastInteraction result = engine.interact(KeyEvent.ofChar('d'));
+        String dismissed = engine.dismissTop();
 
-        assertThat(result).isInstanceOf(ToastInteraction.Dismissed.class);
-        assertThat(((ToastInteraction.Dismissed) result).id()).isEqualTo(second);
+        assertThat(dismissed).isEqualTo(second);
         assertThat(engine.activeIds()).containsExactly(first);
     }
 
     @Test
-    @DisplayName("keyboard shortcut dismisses all toasts")
-    void keyboardShortcutDismissesAllToasts() {
-        ToastEngine engine = ToastEngine.builder()
-                .shortcuts(Arrays.asList(
-                        ToastShortcut.of(KeyTrigger.ch('a'), ToastShortcut.Action.DISMISS_ALL)))
-                .build();
-        engine.show(ToastBuilder.info("one").duration(Duration.ofSeconds(5)).build());
-        engine.show(ToastBuilder.warning("two").duration(Duration.ofSeconds(5)).build());
-
-        ToastInteraction result = engine.interact(KeyEvent.ofChar('a'));
-
-        assertThat(result).isSameAs(ToastInteraction.NONE);
-        assertThat(engine.visibleCount()).isZero();
-    }
-
-    @Test
-    @DisplayName("non matching shortcut leaves toasts unchanged")
-    void nonMatchingShortcutLeavesToastsUnchanged() {
-        ToastEngine engine = ToastEngine.builder()
-                .shortcut(ToastShortcut.of(KeyTrigger.ch('x'), ToastShortcut.Action.DISMISS_TOP))
-                .build();
-        String id = engine.show(ToastBuilder.info("one").duration(Duration.ofSeconds(5)).build());
-
-        ToastInteraction result = engine.interact(KeyEvent.ofChar('y'));
-
-        assertThat(result).isSameAs(ToastInteraction.NONE);
-        assertThat(engine.activeIds()).containsExactly(id);
+    @DisplayName("dismissTop returns null when there are no toasts")
+    void dismissTopEmptyReturnsNull() {
+        ToastEngine engine = ToastEngine.builder().build();
+        assertThat(engine.dismissTop()).isNull();
     }
 }

@@ -4,7 +4,6 @@
  */
 package dev.tamboui.widgets.toast;
 
-import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -26,14 +25,12 @@ import dev.tamboui.widgets.Clear;
 public final class ToastEngine {
 
     private final int maxConcurrent;
-    private final boolean deduplication;
     private final ToastPosition position;
     private final int offsetX;
     private final int offsetY;
     private final BorderMode borderMode;
     private final ProgressStyle defaultProgressStyle;
     private final ToastCopyHandler copyHandler;
-    private final List<ToastShortcut> shortcuts;
 
     private final List<ActiveToast> activeToasts;
     private Rect avoidArea;
@@ -42,14 +39,12 @@ public final class ToastEngine {
 
     private ToastEngine(Builder builder) {
         this.maxConcurrent = builder.maxConcurrent;
-        this.deduplication = builder.deduplication;
         this.position = builder.position;
         this.offsetX = builder.offsetX;
         this.offsetY = builder.offsetY;
         this.borderMode = builder.borderMode;
         this.defaultProgressStyle = builder.defaultProgressStyle;
         this.copyHandler = builder.copyHandler;
-        this.shortcuts = Collections.unmodifiableList(new ArrayList<ToastShortcut>(builder.shortcuts));
         this.activeToasts = new ArrayList<ActiveToast>();
         this.lastRenderedRects = Collections.emptyList();
         this.lastRenderedToasts = Collections.emptyList();
@@ -74,8 +69,9 @@ public final class ToastEngine {
      */
     public String show(Toast toast) {
         Objects.requireNonNull(toast, "toast");
-        if (deduplication) {
-            ActiveToast duplicate = findByDedupKey(toast.dedupKey());
+        String key = toast.deduplicationKey();
+        if (key != null) {
+            ActiveToast duplicate = findByDeduplicationKey(key);
             if (duplicate != null) {
                 if (!toast.sticky() && duplicate.remaining != null) {
                     duplicate.remaining = toast.lifetime();
@@ -141,25 +137,54 @@ public final class ToastEngine {
     }
 
     /**
-     * Handles a toast interaction event.
-     * <p>
-     * Accepts TUI {@code MouseEvent} and {@code KeyEvent} instances when available at runtime.
+     * Dismisses the topmost active toast, if any.
      *
-     * @param event interaction event object
-     * @return interaction result
+     * @return the dismissed toast id, or {@code null} when no toasts are active
      */
-    public ToastInteraction interact(Object event) {
-        if (event == null) {
-            return ToastInteraction.NONE;
+    public String dismissTop() {
+        if (activeToasts.isEmpty()) {
+            return null;
         }
-        String className = event.getClass().getName();
-        if ("dev.tamboui.tui.event.MouseEvent".equals(className)) {
-            return interactMouseEvent(event);
+        ActiveToast top = activeToasts.get(activeToasts.size() - 1);
+        dismiss(top.id);
+        return top.id;
+    }
+
+    /**
+     * Returns the id of the topmost toast whose most recently rendered rectangle contains the point.
+     * <p>
+     * Hit testing uses the rectangles produced by the last {@link #render} or {@link #computeLayout} pass.
+     *
+     * @param x column coordinate
+     * @param y row coordinate
+     * @return the toast id at the point, or {@code null} when none match
+     */
+    public String toastIdAt(int x, int y) {
+        for (int i = lastRenderedRects.size() - 1; i >= 0; i--) {
+            if (i < lastRenderedToasts.size() && lastRenderedRects.get(i).contains(x, y)) {
+                return lastRenderedToasts.get(i).id;
+            }
         }
-        if ("dev.tamboui.tui.event.KeyEvent".equals(className)) {
-            return interactKeyEvent(event);
+        return null;
+    }
+
+    /**
+     * Computes the copyable text for an active toast and notifies the configured copy handler.
+     *
+     * @param id the toast id
+     * @return the copyable text, or {@code null} when the id is not active
+     */
+    public String requestCopy(String id) {
+        for (ActiveToast active : activeToasts) {
+            if (active.id.equals(id)) {
+                String text = copyText(active);
+                if (copyHandler != null) {
+                    copyHandler.onCopyRequested(active.id, text);
+                }
+                return text;
+            }
         }
-        return ToastInteraction.NONE;
+        return null;
     }
 
     /**
@@ -243,15 +268,6 @@ public final class ToastEngine {
     }
 
     /**
-     * Returns whether deduplication is enabled.
-     *
-     * @return {@code true} when dedup is enabled
-     */
-    public boolean deduplication() {
-        return deduplication;
-    }
-
-    /**
      * Returns the configured anchor position.
      *
      * @return toast position
@@ -278,10 +294,6 @@ public final class ToastEngine {
 
     ToastCopyHandler copyHandler() {
         return copyHandler;
-    }
-
-    List<ToastShortcut> shortcuts() {
-        return shortcuts;
     }
 
     List<ActiveToast> activeToasts() {
@@ -328,9 +340,9 @@ public final class ToastEngine {
         return lastRenderedRects;
     }
 
-    private ActiveToast findByDedupKey(String dedupKey) {
+    private ActiveToast findByDeduplicationKey(String key) {
         for (ActiveToast active : activeToasts) {
-            if (active.toast.dedupKey().equals(dedupKey)) {
+            if (key.equals(active.toast.deduplicationKey())) {
                 return active;
             }
         }
@@ -373,121 +385,6 @@ public final class ToastEngine {
         return visible;
     }
 
-    private ToastInteraction interactMouseEvent(Object event) {
-        Integer x = invokeInt(event, "x");
-        Integer y = invokeInt(event, "y");
-        if (x == null || y == null) {
-            return ToastInteraction.NONE;
-        }
-
-        for (int i = lastRenderedRects.size() - 1; i >= 0; i--) {
-            Rect rect = lastRenderedRects.get(i);
-            if (!rect.contains(x.intValue(), y.intValue())) {
-                continue;
-            }
-            if (i >= lastRenderedToasts.size()) {
-                continue;
-            }
-            ActiveToast active = lastRenderedToasts.get(i);
-            if (invokeBoolean(event, "isClick")) {
-                dismiss(active.id);
-                return new ToastInteraction.Dismissed(active.id);
-            }
-            if (invokeBoolean(event, "isRightClick")) {
-                String text = copyText(active);
-                if (copyHandler != null) {
-                    copyHandler.onCopyRequested(active.id, text);
-                }
-                return new ToastInteraction.CopyRequested(active.id, text);
-            }
-        }
-        return ToastInteraction.NONE;
-    }
-
-    private ToastInteraction interactKeyEvent(Object event) {
-        for (ToastShortcut shortcut : shortcuts) {
-            if (!matchesShortcut(shortcut.trigger(), event)) {
-                continue;
-            }
-            if (shortcut.action() == ToastShortcut.Action.DISMISS_ALL) {
-                dismissAll();
-                return ToastInteraction.NONE;
-            }
-            if (shortcut.action() == ToastShortcut.Action.DISMISS_TOP && !activeToasts.isEmpty()) {
-                ActiveToast top = activeToasts.get(activeToasts.size() - 1);
-                dismiss(top.id);
-                return new ToastInteraction.Dismissed(top.id);
-            }
-        }
-        return ToastInteraction.NONE;
-    }
-
-    private static boolean matchesShortcut(ToastShortcutTrigger trigger, Object keyEvent) {
-        if (trigger == null || keyEvent == null) {
-            return false;
-        }
-        Method method = findOneArgMethod(trigger.getClass(), "matchesKey", keyEvent.getClass());
-        if (method == null) {
-            return false;
-        }
-        try {
-            Object result = method.invoke(trigger, keyEvent);
-            return Boolean.TRUE.equals(result);
-        } catch (ReflectiveOperationException e) {
-            return false;
-        }
-    }
-
-    private static Method findOneArgMethod(Class<?> owner, String name, Class<?> argumentType) {
-        for (Method method : owner.getMethods()) {
-            if (!name.equals(method.getName()) || method.getParameterCount() != 1) {
-                continue;
-            }
-            if (method.getParameterTypes()[0].isAssignableFrom(argumentType)) {
-                return method;
-            }
-        }
-        return null;
-    }
-
-    private static boolean invokeBoolean(Object target, String methodName) {
-        Method method = findZeroArgMethod(target.getClass(), methodName);
-        if (method == null) {
-            return false;
-        }
-        try {
-            Object result = method.invoke(target);
-            return Boolean.TRUE.equals(result);
-        } catch (ReflectiveOperationException e) {
-            return false;
-        }
-    }
-
-    private static Integer invokeInt(Object target, String methodName) {
-        Method method = findZeroArgMethod(target.getClass(), methodName);
-        if (method == null) {
-            return null;
-        }
-        try {
-            Object result = method.invoke(target);
-            if (result instanceof Number) {
-                return Integer.valueOf(((Number) result).intValue());
-            }
-        } catch (ReflectiveOperationException e) {
-            return null;
-        }
-        return null;
-    }
-
-    private static Method findZeroArgMethod(Class<?> owner, String name) {
-        for (Method method : owner.getMethods()) {
-            if (name.equals(method.getName()) && method.getParameterCount() == 0) {
-                return method;
-            }
-        }
-        return null;
-    }
-
     private static String copyText(ActiveToast active) {
         if (active.toast.title() == null || active.toast.title().isEmpty()) {
             return active.toast.message();
@@ -505,6 +402,10 @@ public final class ToastEngine {
         }
         Style titleStyle = typeStyle.bold();
         Style progressBarStyle = typeStyle;
+        Style messageStyle = Style.EMPTY;
+        if (toast.backgroundColor() != null) {
+            messageStyle = messageStyle.bg(toast.backgroundColor());
+        }
         if (styles != null) {
             titleStyle = titleStyle.patch(styles.titleStyle());
             progressBarStyle = progressBarStyle.patch(styles.progressStyle());
@@ -517,7 +418,7 @@ public final class ToastEngine {
                 borderMode,
                 typeStyle,
                 titleStyle,
-                Style.EMPTY,
+                messageStyle,
                 progressBarStyle);
     }
 
@@ -716,14 +617,12 @@ public final class ToastEngine {
      */
     public static final class Builder {
         private int maxConcurrent = 4;
-        private boolean deduplication = true;
         private ToastPosition position = ToastPosition.BOTTOM_RIGHT;
         private int offsetX;
         private int offsetY;
         private BorderMode borderMode = BorderMode.SIDE_RAILS;
         private ProgressStyle defaultProgressStyle = ProgressStyle.FULL_BLOCK;
         private ToastCopyHandler copyHandler;
-        private List<ToastShortcut> shortcuts = Collections.emptyList();
 
         private Builder() {
         }
@@ -739,17 +638,6 @@ public final class ToastEngine {
                 throw new IllegalArgumentException("maxConcurrent must be >= 1");
             }
             this.maxConcurrent = maxConcurrent;
-            return this;
-        }
-
-        /**
-         * Enables or disables deduplication.
-         *
-         * @param deduplication whether deduplication is enabled
-         * @return this builder
-         */
-        public Builder deduplication(boolean deduplication) {
-            this.deduplication = deduplication;
             return this;
         }
 
@@ -816,33 +704,6 @@ public final class ToastEngine {
          */
         public Builder onCopyRequested(ToastCopyHandler copyHandler) {
             this.copyHandler = copyHandler;
-            return this;
-        }
-
-        /**
-         * Sets keyboard shortcuts.
-         *
-         * @param shortcuts shortcuts list
-         * @return this builder
-         */
-        public Builder shortcuts(List<ToastShortcut> shortcuts) {
-            Objects.requireNonNull(shortcuts, "shortcuts");
-            this.shortcuts = new ArrayList<ToastShortcut>(shortcuts);
-            return this;
-        }
-
-        /**
-         * Adds one keyboard shortcut.
-         *
-         * @param shortcut shortcut to add
-         * @return this builder
-         */
-        public Builder shortcut(ToastShortcut shortcut) {
-            Objects.requireNonNull(shortcut, "shortcut");
-            if (shortcuts.isEmpty()) {
-                shortcuts = new ArrayList<ToastShortcut>();
-            }
-            shortcuts.add(shortcut);
             return this;
         }
 

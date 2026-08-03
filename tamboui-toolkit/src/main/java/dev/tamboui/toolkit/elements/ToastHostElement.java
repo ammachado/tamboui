@@ -4,6 +4,8 @@
  */
 package dev.tamboui.toolkit.elements;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 import dev.tamboui.layout.Rect;
@@ -14,13 +16,18 @@ import dev.tamboui.toolkit.element.RenderContext;
 import dev.tamboui.toolkit.element.Size;
 import dev.tamboui.toolkit.element.StyledElement;
 import dev.tamboui.toolkit.event.EventResult;
+import dev.tamboui.tui.bindings.KeyTrigger;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.tui.event.MouseEvent;
 import dev.tamboui.widgets.toast.ToastEngine;
-import dev.tamboui.widgets.toast.ToastInteraction;
 
 /**
  * Leaf toolkit element that renders and routes interactions for a {@link ToastEngine}.
+ * <p>
+ * Mouse clicks dismiss the toast under the pointer and right-clicks request a copy of its text.
+ * Keyboard dismiss shortcuts are registered on this host via {@link #dismissTopOn(KeyTrigger)} and
+ * {@link #dismissAllOn(KeyTrigger)}, keeping key matching in the TUI layer where {@link KeyTrigger}
+ * lives rather than in the widget engine.
  *
  * <h2>CSS Child Selectors</h2>
  * <ul>
@@ -35,6 +42,8 @@ import dev.tamboui.widgets.toast.ToastInteraction;
 public final class ToastHostElement extends StyledElement<ToastHostElement> {
 
     private final ToastEngine engine;
+    private final List<KeyTrigger> dismissTopTriggers = new ArrayList<KeyTrigger>();
+    private final List<KeyTrigger> dismissAllTriggers = new ArrayList<KeyTrigger>();
 
     /**
      * Creates a toast host bound to the provided engine.
@@ -43,6 +52,28 @@ public final class ToastHostElement extends StyledElement<ToastHostElement> {
      */
     public ToastHostElement(ToastEngine engine) {
         this.engine = Objects.requireNonNull(engine, "engine");
+    }
+
+    /**
+     * Registers a key trigger that dismisses the topmost toast.
+     *
+     * @param trigger the key trigger
+     * @return this host for chaining
+     */
+    public ToastHostElement dismissTopOn(KeyTrigger trigger) {
+        dismissTopTriggers.add(Objects.requireNonNull(trigger, "trigger"));
+        return this;
+    }
+
+    /**
+     * Registers a key trigger that dismisses all toasts.
+     *
+     * @param trigger the key trigger
+     * @return this host for chaining
+     */
+    public ToastHostElement dismissAllOn(KeyTrigger trigger) {
+        dismissAllTriggers.add(Objects.requireNonNull(trigger, "trigger"));
+        return this;
     }
 
     /**
@@ -78,22 +109,41 @@ public final class ToastHostElement extends StyledElement<ToastHostElement> {
 
     @Override
     public EventResult handleMouseEvent(MouseEvent event) {
-        int before = engine.visibleCount();
-        ToastInteraction interaction = engine.interact(event);
-        return toEventResult(interaction, before);
+        if (event.isClick()) {
+            String id = engine.toastIdAt(event.x(), event.y());
+            if (id != null) {
+                engine.dismiss(id);
+                return EventResult.HANDLED;
+            }
+        } else if (event.isRightClick()) {
+            String id = engine.toastIdAt(event.x(), event.y());
+            if (id != null) {
+                engine.requestCopy(id);
+                return EventResult.HANDLED;
+            }
+        }
+        return EventResult.UNHANDLED;
     }
 
     @Override
     public EventResult handleKeyEvent(KeyEvent event, boolean focused) {
         int before = engine.visibleCount();
-        ToastInteraction interaction = engine.interact(event);
-        return toEventResult(interaction, before);
-    }
-
-    private EventResult toEventResult(ToastInteraction interaction, int visibleBefore) {
-        if (interaction != ToastInteraction.NONE || engine.visibleCount() != visibleBefore) {
-            return EventResult.HANDLED;
+        for (KeyTrigger trigger : dismissAllTriggers) {
+            if (trigger.matchesKey(event)) {
+                engine.dismissAll();
+                return resultForChange(before);
+            }
+        }
+        for (KeyTrigger trigger : dismissTopTriggers) {
+            if (trigger.matchesKey(event)) {
+                engine.dismissTop();
+                return resultForChange(before);
+            }
         }
         return EventResult.UNHANDLED;
+    }
+
+    private EventResult resultForChange(int visibleBefore) {
+        return engine.visibleCount() != visibleBefore ? EventResult.HANDLED : EventResult.UNHANDLED;
     }
 }

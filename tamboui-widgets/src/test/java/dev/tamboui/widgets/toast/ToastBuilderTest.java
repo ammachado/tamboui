@@ -23,7 +23,16 @@ class ToastBuilderTest {
         assertThat(toast.sticky()).isFalse();
         assertThat(toast.lifetime()).isEqualTo(Duration.ofSeconds(3));
         assertThat(toast.progressStyle()).isEqualTo(ProgressStyle.FULL_BLOCK);
-        assertThat(toast.dedupKey()).isNotBlank();
+        assertThat(toast.deduplicationKey()).isNull();
+    }
+
+    @Test
+    @DisplayName("Timed toast without an explicit duration uses the default lifetime")
+    void timedToastDefaultsDuration() {
+        Toast toast = ToastBuilder.info("Saved").build();
+
+        assertThat(toast.sticky()).isFalse();
+        assertThat(toast.lifetime()).isEqualTo(ToastBuilder.DEFAULT_DURATION);
     }
 
     @Test
@@ -36,31 +45,23 @@ class ToastBuilderTest {
     }
 
     @Test
-    @DisplayName("Dedup key is overridable")
-    void customDedupKey() {
+    @DisplayName("Deduplication key is opt-in and overridable")
+    void customDeduplicationKey() {
         Toast toast = ToastBuilder.error("Fail")
                 .duration(Duration.ofSeconds(5))
-                .dedupKey("network-error")
+                .deduplicationKey("network-error")
                 .build();
-        assertThat(toast.dedupKey()).isEqualTo("network-error");
+        assertThat(toast.deduplicationKey()).isEqualTo("network-error");
     }
 
     @Test
-    @DisplayName("Default dedup key hashes type+title+message")
-    void defaultDedupKey() {
-        Toast a = ToastBuilder.success("Done").title("OK").duration(Duration.ofSeconds(5)).build();
-        Toast b = ToastBuilder.success("Done").title("OK").duration(Duration.ofSeconds(5)).build();
-        Toast c = ToastBuilder.success("Done").title("Nope").duration(Duration.ofSeconds(5)).build();
-
-        assertThat(a.dedupKey()).isEqualTo(b.dedupKey());
-        assertThat(a.dedupKey()).isNotEqualTo(c.dedupKey());
-    }
-
-    @Test
-    @DisplayName("Timed toast requires explicit duration")
-    void timedToastRequiresDuration() {
-        assertThatThrownBy(() -> ToastBuilder.info("Saved").build())
+    @DisplayName("Sticky toast rejects an explicit duration")
+    void stickyRejectsDuration() {
+        assertThatThrownBy(() -> ToastBuilder.warning("Check logs")
+                .sticky(true)
+                .duration(Duration.ofSeconds(5))
+                .build())
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("timed toast requires a positive duration");
+                .hasMessage("sticky toast cannot have a lifetime");
     }
 }

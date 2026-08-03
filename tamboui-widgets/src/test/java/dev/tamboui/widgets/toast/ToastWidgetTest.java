@@ -79,6 +79,36 @@ class ToastWidgetTest {
         assertThat(buffer).at(15, 0).hasSymbol("┐");
     }
 
+    @Test
+    @DisplayName("Long title is clamped to the content area and does not overflow the rail")
+    void longTitleDoesNotOverflow() {
+        Rect area = new Rect(0, 0, 12, 5);
+        Buffer buffer = Buffer.empty(area);
+
+        ToastRenderSnapshot snapshot = new ToastRenderSnapshot(
+                "t3",
+                ToastType.INFO,
+                "ThisIsAVeryLongTitleThatOverflows",
+                Arrays.asList("msg"),
+                Double.NaN,
+                BorderMode.SIDE_RAILS,
+                TitleLayout.COMPACT,
+                TitleSeparator.DOT,
+                TitleAlignment.START,
+                false,
+                ProgressStyle.FULL_BLOCK,
+                Style.EMPTY.fg(Color.BLUE),
+                Style.EMPTY.bold(),
+                Style.EMPTY,
+                Style.EMPTY.fg(Color.BLUE));
+
+        ToastWidget.INSTANCE.render(area, buffer, snapshot);
+
+        // Title starts on the first content row and must not paint over the right side rail.
+        Assertions.assertThat(rowText(buffer, 1, 1, 10)).contains("INFO");
+        assertThat(buffer).at(11, 1).hasSymbol("│");
+    }
+
     private static String rowText(Buffer buffer, int x, int y, int width) {
         StringBuilder row = new StringBuilder();
         for (int col = 0; col < width; col++) {

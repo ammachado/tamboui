@@ -502,14 +502,14 @@ include::{snippets-dir}/dev/tamboui/docs/snippets/WidgetsSnippets.java[tags=toas
 Title and lifetime options:
 
 * `.title(text)` - Optional title row
-* `.duration(Duration)` - Auto-dismiss lifetime for timed toasts
+* `.duration(Duration)` - Auto-dismiss lifetime for timed toasts (optional; defaults to `ToastBuilder.DEFAULT_DURATION`)
 * `.sticky(true)` - Stay visible until manually dismissed
 * `.titleLayout(TitleLayout)` - `COMPACT` or `GAPPED` title row
 * `.titleSeparator(TitleSeparator)` - Separator between title segments
 * `.titleAlignment(TitleAlignment)` - Title row alignment
 * `.highlight(true)` - Highlight title band with type accent background
 * `.progressStyle(ProgressStyle)` - Auto-dismiss progress indicator style
-* `.dedupKey(key)` - Deduplication key for the engine
+* `.deduplicationKey(key)` - Opt-in deduplication key; toasts sharing a key are merged instead of duplicated
 
 IMPORTANT: The application must call `engine.tick(Duration)` each frame to advance timed toasts and evict expired entries.
 

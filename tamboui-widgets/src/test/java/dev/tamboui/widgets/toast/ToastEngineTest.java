@@ -27,7 +27,6 @@ class ToastEngineTest {
         ToastEngine engine = ToastEngine.builder().build();
 
         assertThat(engine.maxConcurrent()).isEqualTo(4);
-        assertThat(engine.deduplication()).isTrue();
         assertThat(engine.position()).isEqualTo(ToastPosition.BOTTOM_RIGHT);
         assertThat(engine.visibleCount()).isZero();
     }
@@ -56,14 +55,18 @@ class ToastEngineTest {
         assertThat(engine.activeIds()).isEmpty();
     }
 
+    private static Toast timedKeyed(String message, long millis, String key) {
+        return ToastBuilder.info(message).duration(Duration.ofMillis(millis)).deduplicationKey(key).build();
+    }
+
     @Test
-    @DisplayName("dedup refreshes timed toast expiry")
+    @DisplayName("shared deduplication key refreshes timed toast expiry")
     void dedupRefreshesTimed() {
         ToastEngine engine = ToastEngine.builder().maxConcurrent(2).build();
-        String id = engine.show(timed("Hi", 100));
+        String id = engine.show(timedKeyed("Hi", 100, "hi"));
         engine.tick(Duration.ofMillis(80));
 
-        String duplicateId = engine.show(timed("Hi", 100));
+        String duplicateId = engine.show(timedKeyed("Hi", 100, "hi"));
         engine.tick(Duration.ofMillis(80));
 
         assertThat(duplicateId).isEqualTo(id);
@@ -72,12 +75,25 @@ class ToastEngineTest {
     }
 
     @Test
-    @DisplayName("dedup skips duplicate sticky toast")
+    @DisplayName("toasts without a deduplication key are never merged")
+    void noKeyMeansNoDedup() {
+        ToastEngine engine = ToastEngine.builder().maxConcurrent(4).build();
+
+        String first = engine.show(timed("Hi", 5_000));
+        String second = engine.show(timed("Hi", 5_000));
+
+        assertThat(second).isNotEqualTo(first);
+        assertThat(engine.visibleCount()).isEqualTo(2);
+        assertThat(engine.activeIds()).containsExactly(first, second);
+    }
+
+    @Test
+    @DisplayName("shared deduplication key skips a duplicate sticky toast")
     void dedupSkipsSticky() {
         ToastEngine engine = ToastEngine.builder().maxConcurrent(2).build();
-        String first = engine.show(ToastBuilder.warning("Warn").sticky(true).build());
+        String first = engine.show(ToastBuilder.warning("Warn").sticky(true).deduplicationKey("warn").build());
 
-        String duplicate = engine.show(ToastBuilder.warning("Warn").sticky(true).build());
+        String duplicate = engine.show(ToastBuilder.warning("Warn").sticky(true).deduplicationKey("warn").build());
 
         assertThat(duplicate).isEqualTo(first);
         assertThat(engine.visibleCount()).isEqualTo(1);
