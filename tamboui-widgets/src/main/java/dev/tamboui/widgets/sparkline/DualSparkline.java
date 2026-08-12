@@ -6,6 +6,7 @@ package dev.tamboui.widgets.sparkline;
 
 import java.util.List;
 import java.util.function.LongFunction;
+import java.util.stream.IntStream;
 
 import dev.tamboui.buffer.Buffer;
 import dev.tamboui.layout.Rect;
@@ -24,7 +25,9 @@ import dev.tamboui.widgets.block.Block;
  * <p>
  * The top series renders as bars growing <em>upward</em> from the centre; the bottom series renders as bars growing
  * <em>downward</em> from the centre. Sub-pixel resolution is achieved using Unicode block characters (▁▂▃▄▅▆▇█), giving
- * smooth visual gradation within a single character row. This layout matches the style of macOS Activity Monitor's
+ * smooth visual gradation within a single character row. Because Unicode has no top-anchored eighth blocks, partial
+ * cells of the bottom series are drawn as the complement block glyph in inverse video, which yields the same
+ * eighth-level resolution as the top series. This layout matches the style of macOS Activity Monitor's
  * network and disk activity graphs.
  * <p>
  * Example usage:
@@ -112,7 +115,6 @@ public final class DualSparkline implements Widget {
     private final Long max;
     private final Block block;
     private final Sparkline.BarSet barSet;
-    private final Sparkline.BarSet reversedBarSet;
     private final Sparkline.RenderDirection direction;
     private final boolean showYAxis;
     private final LongFunction<String> yAxisFormatter;
@@ -124,7 +126,6 @@ public final class DualSparkline implements Widget {
         this.max = builder.max;
         this.block = builder.block;
         this.barSet = builder.barSet;
-        this.reversedBarSet = builder.barSet.reversed();
         this.direction = builder.direction;
         this.showYAxis = builder.showYAxis;
         this.yAxisFormatter = builder.yAxisFormatter;
@@ -287,19 +288,34 @@ public final class DualSparkline implements Widget {
                     style = DIM;
                 } else if (r >= bottomStart && r < bottomStart + bottomHalfH) {
                     // Bottom series: bars grow downward from the centre.
-                    // Uses reversed bar set so partial cells fill from the top,
-                    // connecting smoothly to full blocks above.
+                    // Unicode has no top-anchored eighth blocks (only ▔, ▀ and █), so a
+                    // partial cell is drawn as the complement glyph — the part of the
+                    // cell NOT covered by the bar — in inverse video: the glyph area
+                    // takes the cell background and the remainder takes the bar colour,
+                    // giving the same eighth-level resolution as the top series.
                     int rowOffset = r - bottomStart; // 0 at row nearest centre
                     long barPx = botVal * bottomHalfH * 8 / effectiveMax;
                     long threshold = (long) rowOffset * 8;
                     if (barPx >= threshold + 8) {
-                        ch = reversedBarSet.full();
+                        ch = barSet.full();
+                        style = bottomStyle;
                     } else if (barPx > threshold) {
-                        ch = reversedBarSet.symbolForLevel((double) (barPx - threshold) / 8.0);
+                        // Complement the effective level of the symbol the top series
+                        // would draw, not the raw pixel fraction, so coarse bar sets
+                        // (e.g. THREE_LEVELS, where several eighths share a symbol)
+                        // quantize identically on both halves.
+                        int eighths = effectiveEighths(barSet, (int) (barPx - threshold));
+                        if (eighths == 8) {
+                            ch = barSet.full();
+                            style = bottomStyle;
+                        } else {
+                            ch = barSet.symbolForLevel((8 - eighths) / 8.0);
+                            style = bottomStyle.reversed();
+                        }
                     } else {
-                        ch = reversedBarSet.empty();
+                        ch = barSet.empty();
+                        style = bottomStyle;
                     }
-                    style = bottomStyle;
                 } else {
                     // Spare row (even height) — empty
                     ch = barSet.empty();
@@ -334,6 +350,18 @@ public final class DualSparkline implements Widget {
                 }
             }
         }
+    }
+
+    /**
+     * Returns the highest canonical eighth level (1-8) that the bar set maps to the
+     * same symbol as the given level — the fill actually represented on screen.
+     */
+    private static int effectiveEighths(Sparkline.BarSet barSet, int eighths) {
+        String symbol = barSet.symbolForLevel(eighths / 8.0);
+        return IntStream.rangeClosed(eighths, 8)
+                .filter(k -> barSet.symbolForLevel(k / 8.0).equals(symbol))
+                .max()
+                .orElse(eighths);
     }
 
     private long computeMax() {

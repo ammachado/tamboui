@@ -56,13 +56,15 @@ class DualSparklineTest {
     }
 
     @Test
-    @DisplayName("Bottom series uses reversed (upper) block characters")
-    void bottomSeriesUsesReversedBlocks() {
-        // 4/8 = 0.5 → top uses ▄ (lower half), bottom should use ▀ (upper half)
+    @DisplayName("Bottom series renders partial cells as complement glyph in inverse video")
+    void bottomSeriesUsesInverseVideoPartials() {
+        // 4/8 = 0.5 → top uses ▄ (lower half); bottom uses the complement glyph ▄
+        // with the REVERSED modifier, so the top half of the cell shows the bar colour
         DualSparkline chart = DualSparkline.builder()
                 .topData(4)
                 .bottomData(4)
                 .max(8)
+                .bottomStyle(Style.EMPTY.fg(Color.BLUE))
                 .showYAxis(false)
                 .build();
         Rect area = new Rect(0, 0, 1, 3);
@@ -70,7 +72,29 @@ class DualSparklineTest {
 
         chart.render(area, buffer);
 
-        assertThat(buffer).hasContent("▄", "─", "▀");
+        assertThat(buffer).hasContent("▄", "─", "▄");
+        assertThat(buffer).hasStyleAt(0, 2, Style.EMPTY.fg(Color.BLUE).reversed());
+    }
+
+    @Test
+    @DisplayName("Bottom series keeps eighth-level resolution via inverse video")
+    void bottomSeriesKeepsEighthResolution() {
+        // Bottom values 1..7 of max 8 render as the complement glyphs ▇▆▅▄▃▂▁ in
+        // inverse video — no collapse to the coarse ▔/▀/█ upper-block ladder
+        DualSparkline chart = DualSparkline.builder()
+                .topData(0, 0, 0, 0, 0, 0, 0)
+                .bottomData(1, 2, 3, 4, 5, 6, 7)
+                .max(8)
+                .showYAxis(false)
+                .build();
+        Rect area = new Rect(0, 0, 7, 3);
+        Buffer buffer = Buffer.empty(area);
+
+        chart.render(area, buffer);
+
+        assertThat(buffer).hasContent("       ", "───────", "▇▆▅▄▃▂▁");
+        assertThat(buffer).hasStyleAt(0, 2, Style.EMPTY.reversed());
+        assertThat(buffer).hasStyleAt(6, 2, Style.EMPTY.reversed());
     }
 
     @Test
@@ -168,7 +192,7 @@ class DualSparklineTest {
 
         chart.render(area, buffer);
 
-        assertThat(buffer).hasContent(" ▄█", "───", " ▀█");
+        assertThat(buffer).hasContent(" ▄█", "───", " ▄█");
     }
 
     @Test
@@ -186,7 +210,7 @@ class DualSparklineTest {
 
         chart.render(area, buffer);
 
-        assertThat(buffer).hasContent("▄█", "──", "▀█");
+        assertThat(buffer).hasContent("▄█", "──", "▄█");
     }
 
     @Test
@@ -203,7 +227,7 @@ class DualSparklineTest {
 
         chart.render(area, buffer);
 
-        assertThat(buffer).hasContent("▂▄█", "───", "▔▀█");
+        assertThat(buffer).hasContent("▂▄█", "───", "▆▄█");
     }
 
     @Test
@@ -221,25 +245,30 @@ class DualSparklineTest {
 
         chart.render(area, buffer);
 
-        assertThat(buffer).hasContent("▆▇█", "───", "███");
+        assertThat(buffer).hasContent("▆▇█", "───", "▂▁█");
     }
 
     @Test
     @DisplayName("THREE_LEVELS bar set uses coarser symbols")
     void withThreeLevelsBarSet() {
-        // With THREE_LEVELS, 6/8=0.75 → "█" (not "▆" as in NINE_LEVELS)
+        // With THREE_LEVELS, 3/8 → "▄" and 6/8=0.75 → "█" (not "▃"/"▆" as in
+        // NINE_LEVELS). The bottom series quantizes identically to the top:
+        // 6/8 collapses to a full cell (no inverse video) and 3/8 renders as
+        // the complement of the effective half level ("▄" in inverse video).
         DualSparkline chart = DualSparkline.builder()
-                .topData(0, 6, 8)
-                .bottomData(0, 6, 8)
+                .topData(0, 3, 6, 8)
+                .bottomData(0, 3, 6, 8)
                 .barSet(Sparkline.BarSet.THREE_LEVELS)
                 .showYAxis(false)
                 .build();
-        Rect area = new Rect(0, 0, 3, 3);
+        Rect area = new Rect(0, 0, 4, 3);
         Buffer buffer = Buffer.empty(area);
 
         chart.render(area, buffer);
 
-        assertThat(buffer).hasContent(" ██", "───", " ██");
+        assertThat(buffer).hasContent(" ▄██", "────", " ▄██");
+        assertThat(buffer).hasStyleAt(1, 2, Style.EMPTY.reversed());
+        assertThat(buffer).hasStyleAt(2, 2, Style.EMPTY);
     }
 
     @Test
@@ -291,7 +320,7 @@ class DualSparklineTest {
         chart.render(area, buffer);
 
         // 4/8 → "▄", 8/8 → "█"; columns 2-4 remain empty
-        assertThat(buffer).hasContent("▄█   ", "──   ", "▀█   ");
+        assertThat(buffer).hasContent("▄█   ", "──   ", "▄█   ");
     }
 
     // -------------------------------------------------------------------------
