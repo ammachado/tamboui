@@ -51,6 +51,34 @@ public final class BackendFactory {
     }
 
     /**
+     * Wraps a backend for Asciinema recording when recording is enabled via system properties.
+     * <p>
+     * {@link #create()} applies this automatically. Call it explicitly when you build a backend
+     * yourself and pass it to {@code TuiConfig.Builder#backend(Backend)}, since that path bypasses
+     * this factory and would otherwise silently ignore the {@code tamboui.record} properties.
+     * <p>
+     * If recording is not enabled, the backend is returned unchanged. The call is idempotent: a backend that is already
+     * recording is returned as-is, so applying it twice does not stack wrappers.
+     *
+     * @param  backend the backend to wrap
+     * @return         a recording backend when recording is enabled, otherwise {@code backend}
+     */
+    public static Backend applyRecording(Backend backend) {
+        if (backend instanceof RecordingBackend) {
+            return backend;
+        }
+        // Check the properties before load(), which returns its cached config without re-reading them
+        if (!RecordingConfig.isEnabled()) {
+            return backend;
+        }
+        RecordingConfig recordingConfig = RecordingConfig.load();
+        if (recordingConfig != null) {
+            return new RecordingBackend(backend, recordingConfig);
+        }
+        return backend;
+    }
+
+    /**
      * Creates a new backend instance using the discovered provider.
      * <p>
      * This method discovers {@link BackendProvider} implementations on the classpath
@@ -110,15 +138,8 @@ public final class BackendFactory {
                 ? resolveProviders(userSelectedProvider, allProviders, loadFailures)
                 : allProviders;
 
-        Backend backend = tryProviders(providers, loadFailures);
-
         // Check if recording is enabled and wrap the backend
-        RecordingConfig recordingConfig = RecordingConfig.load();
-        if (recordingConfig != null) {
-            backend = new RecordingBackend(backend, recordingConfig);
-        }
-
-        return backend;
+        return applyRecording(tryProviders(providers, loadFailures));
     }
 
     /**
