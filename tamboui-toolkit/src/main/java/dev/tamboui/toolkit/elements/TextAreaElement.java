@@ -10,6 +10,7 @@ import java.util.Map;
 
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Color;
+import dev.tamboui.style.Overflow;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.toolkit.element.RenderContext;
@@ -72,6 +73,8 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
     private boolean showCursor = true;
     private boolean showLineNumbers = false;
     private Style lineNumberStyle;
+    private Overflow wrap;
+    private int lastVisibleWidth;
     private TextChangeListener changeListener;
 
     /** Creates a new text area element with a default state. */
@@ -198,6 +201,48 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
     }
 
     /**
+     * Sets the wrap mode.
+     * <p>
+     * {@link Overflow#CLIP} (the default) preserves horizontal-scroll behavior. {@code
+     * WRAP_WORD}/{@code WRAP_CHARACTER} wrap long lines across multiple screen rows instead,
+     * and Up/Down move the cursor by visual row rather than logical line.
+     *
+     * @param overflow the wrap mode
+     * @return this builder
+     */
+    public TextAreaElement overflow(Overflow overflow) {
+        this.wrap = overflow;
+        return this;
+    }
+
+    /**
+     * Disables wrapping (horizontal scroll instead). This is the default.
+     *
+     * @return this builder
+     */
+    public TextAreaElement clip() {
+        return overflow(Overflow.CLIP);
+    }
+
+    /**
+     * Wraps long lines at word boundaries.
+     *
+     * @return this builder
+     */
+    public TextAreaElement wrapWord() {
+        return overflow(Overflow.WRAP_WORD);
+    }
+
+    /**
+     * Wraps long lines at character boundaries.
+     *
+     * @return this builder
+     */
+    public TextAreaElement wrapCharacter() {
+        return overflow(Overflow.WRAP_CHARACTER);
+    }
+
+    /**
      * Sets the title for the border.
      *
      * @param title the border title
@@ -314,7 +359,7 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
         if (!focused) {
             return EventResult.UNHANDLED;
         }
-        boolean handled = handleTextAreaKey(state, event);
+        boolean handled = handleTextAreaKey(state, event, lastVisibleWidth, wrap);
         if (handled && changeListener != null) {
             changeListener.onTextChange(state.text());
         }
@@ -324,7 +369,7 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
     /**
      * Handles common key events for text area input.
      */
-    private static boolean handleTextAreaKey(TextAreaState state, KeyEvent event) {
+    private static boolean handleTextAreaKey(TextAreaState state, KeyEvent event, int visibleWidth, Overflow wrap) {
         switch (event.code()) {
             case BACKSPACE:
                 state.deleteBackward();
@@ -339,10 +384,10 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
                 state.moveCursorRight();
                 return true;
             case UP:
-                state.moveCursorUp();
+                state.moveCursorUp(visibleWidth, wrap);
                 return true;
             case DOWN:
-                state.moveCursorDown();
+                state.moveCursorDown(visibleWidth, wrap);
                 return true;
             case HOME:
                 state.moveCursorToLineStart();
@@ -391,12 +436,14 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
             .placeholder(placeholder)
             .placeholderStyle(effectivePlaceholderStyle)
             .showLineNumbers(showLineNumbers)
-            .lineNumberStyle(effectiveLineNumberStyle);
+            .lineNumberStyle(effectiveLineNumberStyle)
+            .wrap(wrap);
 
         Color effectiveBorderColor = isFocused && focusedBorderColor != null
                 ? focusedBorderColor
                 : borderColor;
 
+        Block block = null;
         if (title != null || borderType != null || effectiveBorderColor != null) {
             Block.Builder blockBuilder = Block.builder()
                     .borders(Borders.ALL)
@@ -410,8 +457,11 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
             if (effectiveBorderColor != null) {
                 blockBuilder.borderColor(effectiveBorderColor);
             }
-            builder.block(blockBuilder.build());
+            block = blockBuilder.build();
+            builder.block(block);
         }
+
+        lastVisibleWidth = computeVisibleWidth(area, block);
 
         TextArea widget = builder.build();
 
@@ -420,6 +470,26 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
         } else {
             frame.renderStatefulWidget(widget, area, state);
         }
+    }
+
+    /**
+     * Computes the text-content width available inside {@code area}, after the block border
+     * (if any) and the line-number gutter (if enabled) — mirroring {@code TextArea}'s own
+     * layout math, since that width isn't otherwise exposed back to the element.
+     */
+    private int computeVisibleWidth(Rect area, Block block) {
+        Rect inputArea = block != null ? block.inner(area) : area;
+        if (inputArea.isEmpty()) {
+            return 0;
+        }
+        int gutterWidth = 0;
+        if (showLineNumbers) {
+            int lineDigits = String.valueOf(state.lineCount()).length();
+            gutterWidth = Math.max(2, lineDigits) + 2;
+        }
+        return gutterWidth > 0 && inputArea.width() > gutterWidth
+            ? inputArea.width() - gutterWidth
+            : inputArea.width();
     }
 
     /**

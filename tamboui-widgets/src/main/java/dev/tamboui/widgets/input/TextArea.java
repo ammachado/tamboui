@@ -4,11 +4,14 @@
  */
 package dev.tamboui.widgets.input;
 
+import java.util.List;
+
 import dev.tamboui.buffer.Buffer;
 import dev.tamboui.buffer.Cell;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Color;
 import dev.tamboui.style.ColorConverter;
+import dev.tamboui.style.Overflow;
 import dev.tamboui.style.PropertyDefinition;
 import dev.tamboui.style.PropertyRegistry;
 import dev.tamboui.style.StandardProperties;
@@ -59,11 +62,13 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
     private final Style placeholderStyle;
     private final boolean showLineNumbers;
     private final Style lineNumberStyle;
+    private final Overflow wrap;
 
     private TextArea(Builder builder) {
         this.block = builder.block;
         this.placeholder = builder.placeholder;
         this.showLineNumbers = builder.showLineNumbers;
+        this.wrap = builder.resolveWrap();
 
         // Resolve style-aware properties
         Color resolvedBg = builder.resolveBackground();
@@ -157,32 +162,28 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
         }
 
         // Ensure cursor is visible
-        state.ensureCursorVisible(visibleHeight, visibleWidth);
+        state.ensureCursorVisible(visibleHeight, visibleWidth, wrap);
 
-        // Render visible lines
+        if (wrap == Overflow.CLIP) {
+            renderClipped(inputArea, textArea, gutterWidth, buffer, state, visibleHeight, visibleWidth);
+        } else {
+            renderWrapped(inputArea, textArea, gutterWidth, buffer, state, visibleHeight, visibleWidth);
+        }
+    }
+
+    private void renderClipped(Rect inputArea, Rect textArea, int gutterWidth, Buffer buffer, TextAreaState state,
+                                int visibleHeight, int visibleWidth) {
         int scrollRow = state.scrollRow();
         int scrollCol = state.scrollCol();
 
         for (int y = 0; y < visibleHeight; y++) {
             int lineIndex = scrollRow + y;
             int screenY = textArea.top() + y;
+            boolean hasLine = lineIndex < state.lineCount();
 
-            // Render line number if enabled
-            if (showLineNumbers && gutterWidth > 0) {
-                if (lineIndex < state.lineCount()) {
-                    String lineNum = String.format("%" + (gutterWidth - 2) + "d ", lineIndex + 1);
-                    buffer.setString(inputArea.left(), screenY, lineNum, lineNumberStyle);
-                    buffer.set(inputArea.left() + gutterWidth - 1, screenY,
-                        new Cell("|", lineNumberStyle));
-                } else {
-                    // Empty line number area
-                    for (int x = inputArea.left(); x < inputArea.left() + gutterWidth; x++) {
-                        buffer.set(x, screenY, new Cell(" ", lineNumberStyle));
-                    }
-                }
-            }
+            renderGutterCell(inputArea, gutterWidth, screenY, hasLine ? lineIndex + 1 : -1, buffer);
 
-            if (lineIndex < state.lineCount()) {
+            if (hasLine) {
                 String line = state.getLine(lineIndex);
 
                 // Calculate visible portion of line
@@ -206,6 +207,55 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
                 for (int x = textArea.left(); x < textArea.right(); x++) {
                     buffer.set(x, screenY, new Cell(" ", style));
                 }
+            }
+        }
+    }
+
+    private void renderWrapped(Rect inputArea, Rect textArea, int gutterWidth, Buffer buffer, TextAreaState state,
+                                int visibleHeight, int visibleWidth) {
+        List<TextAreaState.DisplayRow> rows = state.computeDisplayRows(visibleWidth, wrap);
+        int scrollRow = state.scrollRow();
+
+        for (int y = 0; y < visibleHeight; y++) {
+            int rowIndex = scrollRow + y;
+            int screenY = textArea.top() + y;
+
+            if (rowIndex < rows.size()) {
+                TextAreaState.DisplayRow row = rows.get(rowIndex);
+                String line = state.getLine(row.logicalRow());
+                String visibleText = line.substring(row.startCol(), row.endCol());
+
+                // Only the first wrapped row of a logical line shows its line number.
+                int lineNumber = row.startCol() == 0 ? row.logicalRow() + 1 : -1;
+                renderGutterCell(inputArea, gutterWidth, screenY, lineNumber, buffer);
+
+                buffer.setString(textArea.left(), screenY, visibleText, style);
+
+                int visibleTextWidth = CharWidth.of(visibleText);
+                int textEnd = textArea.left() + visibleTextWidth;
+                for (int x = textEnd; x < textArea.right(); x++) {
+                    buffer.set(x, screenY, new Cell(" ", style));
+                }
+            } else {
+                renderGutterCell(inputArea, gutterWidth, screenY, -1, buffer);
+                for (int x = textArea.left(); x < textArea.right(); x++) {
+                    buffer.set(x, screenY, new Cell(" ", style));
+                }
+            }
+        }
+    }
+
+    private void renderGutterCell(Rect inputArea, int gutterWidth, int screenY, int lineNumber, Buffer buffer) {
+        if (!showLineNumbers || gutterWidth <= 0) {
+            return;
+        }
+        if (lineNumber > 0) {
+            String lineNum = String.format("%" + (gutterWidth - 2) + "d ", lineNumber);
+            buffer.setString(inputArea.left(), screenY, lineNum, lineNumberStyle);
+            buffer.set(inputArea.left() + gutterWidth - 1, screenY, new Cell("|", lineNumberStyle));
+        } else {
+            for (int x = inputArea.left(); x < inputArea.left() + gutterWidth; x++) {
+                buffer.set(x, screenY, new Cell(" ", lineNumberStyle));
             }
         }
     }
@@ -245,22 +295,34 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
             );
         }
 
-        int cursorRow = state.cursorRow();
-        int cursorCol = state.cursorCol();
         int scrollRow = state.scrollRow();
         int scrollCol = state.scrollCol();
 
-        // Check if cursor is visible
-        int relativeRow = cursorRow - scrollRow;
-        // Convert char-offset cursor column to display column relative to scroll
+        int relativeRow;
         int relativeCol;
-        if (cursorCol < scrollCol) {
-            relativeCol = -1; // cursor is left of the viewport
+        if (wrap == Overflow.CLIP) {
+            int cursorRow = state.cursorRow();
+            int cursorCol = state.cursorCol();
+
+            // Check if cursor is visible
+            relativeRow = cursorRow - scrollRow;
+            // Convert char-offset cursor column to display column relative to scroll
+            if (cursorCol < scrollCol) {
+                relativeCol = -1; // cursor is left of the viewport
+            } else {
+                String cursorLine = state.getLine(cursorRow);
+                int from = Math.min(scrollCol, cursorLine.length());
+                int to = Math.min(cursorCol, cursorLine.length());
+                relativeCol = CharWidth.of(cursorLine.substring(from, to));
+            }
         } else {
-            String cursorLine = state.getLine(cursorRow);
-            int from = Math.min(scrollCol, cursorLine.length());
-            int to = Math.min(cursorCol, cursorLine.length());
-            relativeCol = CharWidth.of(cursorLine.substring(from, to));
+            List<TextAreaState.DisplayRow> rows = state.computeDisplayRows(textArea.width(), wrap);
+            int cursorDisplayIndex = TextAreaState.findDisplayRowIndex(rows, state.cursorRow(), state.cursorCol());
+            TextAreaState.DisplayRow row = rows.get(cursorDisplayIndex);
+
+            relativeRow = cursorDisplayIndex - scrollRow;
+            String cursorLine = state.getLine(row.logicalRow());
+            relativeCol = CharWidth.of(cursorLine.substring(row.startCol(), state.cursorCol()));
         }
 
         if (relativeRow >= 0 && relativeRow < textArea.height() &&
@@ -286,6 +348,7 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
         private Style placeholderStyle = Style.EMPTY.dim();
         private boolean showLineNumbers = false;
         private Style lineNumberStyle = Style.EMPTY.dim();
+        private Overflow wrap;
         private StylePropertyResolver styleResolver = StylePropertyResolver.empty();
 
         // Style-aware properties (resolved via styleResolver in build())
@@ -371,6 +434,21 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
          */
         public Builder lineNumberStyle(Style style) {
             this.lineNumberStyle = style;
+            return this;
+        }
+
+        /**
+         * Sets the wrap mode.
+         * <p>
+         * {@link Overflow#CLIP} (the default) preserves today's horizontal-scroll behavior.
+         * {@code WRAP_WORD}/{@code WRAP_CHARACTER} wrap long lines across multiple screen rows
+         * instead of scrolling horizontally.
+         *
+         * @param wrap the wrap mode
+         * @return this builder
+         */
+        public Builder wrap(Overflow wrap) {
+            this.wrap = wrap;
             return this;
         }
 
@@ -482,6 +560,11 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
 
         private Color resolveLineNumberColor() {
             return styleResolver.resolve(LINE_NUMBER_COLOR, lineNumberColor);
+        }
+
+        private Overflow resolveWrap() {
+            Overflow resolved = styleResolver.resolve(StandardProperties.TEXT_OVERFLOW, wrap);
+            return resolved != null ? resolved : Overflow.CLIP;
         }
     }
 }

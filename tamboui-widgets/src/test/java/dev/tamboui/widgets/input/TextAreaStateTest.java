@@ -4,9 +4,13 @@
  */
 package dev.tamboui.widgets.input;
 
+import java.util.List;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+
+import dev.tamboui.style.Overflow;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -431,6 +435,178 @@ class TextAreaStateTest {
             state.scrollDown(10, 2); // With 3 lines and 2 visible, max scroll is 1
 
             assertThat(state.scrollRow()).isEqualTo(1);
+        }
+    }
+
+    @Nested
+    @DisplayName("Wrapping")
+    class Wrapping {
+
+        @Test
+        @DisplayName("computeDisplayRows with CLIP returns one row per logical line")
+        void computeDisplayRowsClip() {
+            TextAreaState state = new TextAreaState("Hello\nWorld");
+
+            List<TextAreaState.DisplayRow> rows = state.computeDisplayRows(80, Overflow.CLIP);
+
+            assertThat(rows).hasSize(2);
+            assertThat(rows.get(0).logicalRow()).isEqualTo(0);
+            assertThat(rows.get(0).startCol()).isEqualTo(0);
+            assertThat(rows.get(0).endCol()).isEqualTo(5);
+            assertThat(rows.get(1).logicalRow()).isEqualTo(1);
+            assertThat(rows.get(1).startCol()).isEqualTo(0);
+            assertThat(rows.get(1).endCol()).isEqualTo(5);
+        }
+
+        @Test
+        @DisplayName("computeDisplayRows with WRAP_CHARACTER splits a long line by width")
+        void computeDisplayRowsWrapCharacter() {
+            TextAreaState state = new TextAreaState("HelloWorld");
+
+            List<TextAreaState.DisplayRow> rows = state.computeDisplayRows(4, Overflow.WRAP_CHARACTER);
+
+            assertThat(rows).hasSize(3);
+            assertThat(rows.get(0).logicalRow()).isEqualTo(0);
+            assertThat(rows.get(0).startCol()).isEqualTo(0);
+            assertThat(rows.get(0).endCol()).isEqualTo(4);
+            assertThat(rows.get(1).startCol()).isEqualTo(4);
+            assertThat(rows.get(1).endCol()).isEqualTo(8);
+            assertThat(rows.get(2).startCol()).isEqualTo(8);
+            assertThat(rows.get(2).endCol()).isEqualTo(10);
+        }
+
+        @Test
+        @DisplayName("computeDisplayRows with WRAP_WORD breaks at word boundaries")
+        void computeDisplayRowsWrapWord() {
+            TextAreaState state = new TextAreaState("one two three");
+
+            List<TextAreaState.DisplayRow> rows = state.computeDisplayRows(7, Overflow.WRAP_WORD);
+
+            assertThat(rows).hasSize(2);
+            assertThat(state.getLine(0).substring(rows.get(0).startCol(), rows.get(0).endCol()))
+                .isEqualTo("one two");
+            assertThat(state.getLine(0).substring(rows.get(1).startCol(), rows.get(1).endCol()))
+                .isEqualTo("three");
+        }
+
+        @Test
+        @DisplayName("computeDisplayRows with WRAP_CHARACTER splits wide (CJK) characters by display width")
+        void computeDisplayRowsWrapCharacterWideChars() {
+            TextAreaState state = new TextAreaState("世界你好"); // 4 chars * 2 width = 8 cols
+
+            // 5-wide area: "世界" (4 cols) fits, "你" (2 cols) would overflow to 6
+            List<TextAreaState.DisplayRow> rows = state.computeDisplayRows(5, Overflow.WRAP_CHARACTER);
+
+            assertThat(rows).hasSize(2);
+            assertThat(state.getLine(0).substring(rows.get(0).startCol(), rows.get(0).endCol()))
+                .isEqualTo("世界");
+            assertThat(state.getLine(0).substring(rows.get(1).startCol(), rows.get(1).endCol()))
+                .isEqualTo("你好");
+        }
+
+        @Test
+        @DisplayName("computeDisplayRows keeps an empty logical line as a single empty row")
+        void computeDisplayRowsEmptyLine() {
+            TextAreaState state = new TextAreaState("Hello\n\nWorld");
+
+            List<TextAreaState.DisplayRow> rows = state.computeDisplayRows(3, Overflow.WRAP_WORD);
+
+            assertThat(rows).extracting(TextAreaState.DisplayRow::logicalRow)
+                .containsExactly(0, 0, 1, 2, 2);
+            TextAreaState.DisplayRow emptyLineRow = rows.stream()
+                .filter(r -> r.logicalRow() == 1)
+                .findFirst()
+                .get();
+            assertThat(emptyLineRow.startCol()).isEqualTo(0);
+            assertThat(emptyLineRow.endCol()).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("ensureCursorVisible with CLIP behaves exactly as the 2-arg overload")
+        void ensureCursorVisibleClipDelegates() {
+            TextAreaState state = new TextAreaState("Line1\nLine2\nLine3\nLine4\nLine5");
+
+            state.ensureCursorVisible(3, 80, Overflow.CLIP);
+
+            assertThat(state.scrollRow()).isEqualTo(2); // Shows lines 2, 3, 4 - same as existing test
+        }
+
+        @Test
+        @DisplayName("ensureCursorVisible with WRAP_WORD scrolls by display row, not logical row")
+        void ensureCursorVisibleWrapScrollsByDisplayRow() {
+            // "one two three four five" wraps to 5 rows at width 7:
+            // "one two", "three", "four", "five" -- wait, compute precisely in-test via wrap.
+            TextAreaState state = new TextAreaState("one two three four five six seven");
+            state.moveCursorToEnd(); // cursor at the very end (last display row)
+
+            state.ensureCursorVisible(2, 7, Overflow.WRAP_WORD);
+
+            List<TextAreaState.DisplayRow> rows = state.computeDisplayRows(7, Overflow.WRAP_WORD);
+            int cursorDisplayIndex = rows.size() - 1; // cursor is on the last display row
+            assertThat(state.scrollRow()).isEqualTo(cursorDisplayIndex - 2 + 1);
+            assertThat(state.scrollCol()).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("moveCursorDown with WRAP_WORD moves to the next visual row within the same logical line")
+        void moveCursorDownWrapMovesByVisualRow() {
+            // "one two three" wraps at width 7 to "one two" (row0) / "three" (row0, 2nd visual row)
+            TextAreaState state = new TextAreaState("one two three");
+            state.moveCursorToStart(); // row 0, col 0 -> on the first visual row ("one two")
+
+            state.moveCursorDown(7, Overflow.WRAP_WORD);
+
+            assertThat(state.cursorRow()).isEqualTo(0); // still the same logical line
+            assertThat(state.cursorCol()).isEqualTo(8); // start of "three" segment
+        }
+
+        @Test
+        @DisplayName("moveCursorDown with WRAP_WORD at the last visual row does nothing")
+        void moveCursorDownWrapAtLastRowDoesNothing() {
+            TextAreaState state = new TextAreaState("one two three");
+            state.moveCursorToEnd(); // last visual row
+
+            state.moveCursorDown(7, Overflow.WRAP_WORD);
+
+            assertThat(state.cursorRow()).isEqualTo(0);
+            assertThat(state.cursorCol()).isEqualTo(13); // unchanged, end of text
+        }
+
+        @Test
+        @DisplayName("moveCursorUp with WRAP_WORD moves to the previous visual row within the same logical line")
+        void moveCursorUpWrapMovesByVisualRow() {
+            TextAreaState state = new TextAreaState("one two three");
+            state.moveCursorToEnd(); // on "three" segment (second visual row)
+
+            state.moveCursorUp(7, Overflow.WRAP_WORD);
+
+            assertThat(state.cursorRow()).isEqualTo(0);
+            assertThat(state.cursorCol()).isEqualTo(7); // clamped into "one two" segment [0,7]
+        }
+
+        @Test
+        @DisplayName("moveCursorUp with WRAP_WORD at the first visual row does nothing")
+        void moveCursorUpWrapAtFirstRowDoesNothing() {
+            TextAreaState state = new TextAreaState("one two three");
+            state.moveCursorToStart();
+
+            state.moveCursorUp(7, Overflow.WRAP_WORD);
+
+            assertThat(state.cursorRow()).isEqualTo(0);
+            assertThat(state.cursorCol()).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("moveCursorDown with WRAP_WORD crosses into the next logical line's first visual row")
+        void moveCursorDownWrapCrossesLogicalLine() {
+            TextAreaState state = new TextAreaState("one two three\nfour");
+            state.moveCursorToStart();
+            state.moveCursorDown(7, Overflow.WRAP_WORD); // -> "three" segment (row 0)
+
+            state.moveCursorDown(7, Overflow.WRAP_WORD); // -> "four" (row 1, only segment)
+
+            assertThat(state.cursorRow()).isEqualTo(1);
+            assertThat(state.cursorCol()).isEqualTo(4); // clamped into "four" (length 4)
         }
     }
 

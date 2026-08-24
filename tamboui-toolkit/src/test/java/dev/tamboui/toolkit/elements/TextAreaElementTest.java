@@ -543,4 +543,59 @@ class TextAreaElementTest extends AbstractElementTest {
             assertThat(buffer.get(0, 0).style().fg()).contains(Color.YELLOW);
         }
     }
+
+    @Nested
+    @DisplayName("Wrapping")
+    class Wrapping {
+
+        @Test
+        @DisplayName("wrapWord() wraps long lines across multiple screen rows")
+        void wrapWordWrapsLongLines() {
+            Rect area = new Rect(0, 0, 7, 3);
+            Buffer buffer = Buffer.empty(area);
+            Frame frame = Frame.forTesting(buffer);
+
+            textArea().text("one two three").wrapWord()
+                .render(frame, area, RenderContext.empty());
+
+            assertThat(buffer.get(0, 0).symbol()).isEqualTo("o");
+            assertThat(buffer.get(4, 0).symbol()).isEqualTo("t"); // "one two"[4] == 't'
+            assertThat(buffer.get(0, 1).symbol()).isEqualTo("t"); // "three" wraps to row 1
+            assertThat(buffer.get(4, 1).symbol()).isEqualTo("e");
+        }
+
+        @Test
+        @DisplayName("Without wrap(), a long line is clipped, not wrapped (unchanged default)")
+        void noWrapClipsByDefault() {
+            Rect area = new Rect(0, 0, 7, 3);
+            Buffer buffer = Buffer.empty(area);
+            Frame frame = Frame.forTesting(buffer);
+
+            TextAreaState state = new TextAreaState("one two three");
+            state.moveCursorToStart(); // avoid CLIP auto-scrolling to the end-of-text cursor
+
+            textArea(state).render(frame, area, RenderContext.empty());
+
+            assertThat(buffer.get(0, 0).symbol()).isEqualTo("o");
+            assertThat(buffer.get(0, 1).symbol()).isEqualTo(" "); // row 1 stays empty, no wrap
+        }
+
+        @Test
+        @DisplayName("Up/Down move the cursor by visual row once a wrapped layout has been rendered")
+        void arrowKeysMoveByVisualRowWhenWrapped() {
+            Rect area = new Rect(0, 0, 7, 3);
+            Buffer buffer = Buffer.empty(area);
+            Frame frame = Frame.forTesting(buffer);
+
+            TextAreaState state = new TextAreaState("one two three");
+            TextAreaElement element = textArea(state).wrapWord();
+            element.render(frame, area, RenderContext.empty()); // establishes the 7-wide layout
+            state.moveCursorToStart(); // back to row 0, col 0 (first visual row)
+
+            element.handleKeyEvent(new KeyEvent(KeyCode.DOWN, KeyModifiers.NONE, '\0'), true);
+
+            assertThat(state.cursorRow()).isEqualTo(0); // still logical line 0
+            assertThat(state.cursorCol()).isEqualTo(8); // start of "three" segment, not end of doc
+        }
+    }
 }
