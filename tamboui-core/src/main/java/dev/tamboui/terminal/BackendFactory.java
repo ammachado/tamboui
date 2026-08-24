@@ -59,6 +59,11 @@ public final class BackendFactory {
      * <p>
      * If recording is not enabled, the backend is returned unchanged. The call is idempotent: a backend that is already
      * recording is returned as-is, so applying it twice does not stack wrappers.
+     * <p>
+     * Enablement is read from the {@code tamboui.record} system property on every call. This also changes
+     * {@link #create()}, which previously wrapped whenever the config loaded: because the config is cached
+     * process-wide, {@code create()} kept wrapping after the property had been cleared. Both paths now stop wrapping
+     * as soon as the property goes away.
      *
      * @param  backend the backend to wrap
      * @return         a recording backend when recording is enabled, otherwise {@code backend}
@@ -72,10 +77,7 @@ public final class BackendFactory {
             return backend;
         }
         RecordingConfig recordingConfig = RecordingConfig.load();
-        if (recordingConfig != null) {
-            return new RecordingBackend(backend, recordingConfig);
-        }
-        return backend;
+        return recordingConfig != null ? new RecordingBackend(backend, recordingConfig) : backend;
     }
 
     /**
