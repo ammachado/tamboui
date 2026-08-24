@@ -5,6 +5,7 @@
 package dev.tamboui.widgets.input;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import dev.tamboui.style.Overflow;
@@ -20,6 +21,16 @@ public final class TextAreaState {
     private int cursorCol;
     private int scrollRow;
     private int scrollCol;
+    private int lastRenderedWidth;
+
+    /** Bumped on every text mutation; used to invalidate the cached display rows. */
+    private int textVersion;
+
+    // Cached result of the most recent computeDisplayRows() call.
+    private List<DisplayRow> cachedRows;
+    private int cachedWidth;
+    private Overflow cachedOverflow;
+    private int cachedVersion = -1;
 
     /** Creates a new empty text area state. */
     public TextAreaState() {
@@ -119,6 +130,25 @@ public final class TextAreaState {
         return scrollCol;
     }
 
+    /**
+     * Returns the text-content width, in display columns, that the most recent render used
+     * (that is, the area width minus any block border and line-number gutter).
+     * <p>
+     * This is the single source of truth for callers that need the wrap width outside of a
+     * render pass, such as {@code Up}/{@code Down} key handling. It is {@code 0} until the
+     * widget has been rendered at least once.
+     *
+     * @return the last rendered text-content width, or {@code 0} if never rendered
+     */
+    public int lastRenderedWidth() {
+        return lastRenderedWidth;
+    }
+
+    /** Records the text-content width used by a render pass. Called by {@link TextArea}. */
+    void lastRenderedWidth(int width) {
+        this.lastRenderedWidth = width;
+    }
+
     // --- Text Modification ---
 
     /**
@@ -127,6 +157,7 @@ public final class TextAreaState {
      * @param c the character to insert
      */
     public void insert(char c) {
+        textVersion++;
         if (c == '\n') {
             insertNewline();
         } else {
@@ -157,6 +188,7 @@ public final class TextAreaState {
 
     /** Deletes the grapheme cluster before the cursor. */
     public void deleteBackward() {
+        textVersion++;
         if (cursorCol > 0) {
             StringBuilder line = lines.get(cursorRow);
             int start = GraphemeClusters.clusterStart(line, cursorCol);
@@ -174,6 +206,7 @@ public final class TextAreaState {
 
     /** Deletes the grapheme cluster after the cursor. */
     public void deleteForward() {
+        textVersion++;
         StringBuilder currentLine = lines.get(cursorRow);
         if (cursorCol < currentLine.length()) {
             int end = GraphemeClusters.clusterEnd(currentLine, cursorCol);
@@ -216,21 +249,22 @@ public final class TextAreaState {
     /**
      * Moves the cursor up one row.
      * <p>
-     * With {@link Overflow#CLIP}, behaves exactly like {@link #moveCursorUp()} (one logical
-     * row). With {@code WRAP_WORD}/{@code WRAP_CHARACTER}, moves to the previous visual
-     * (wrapped) row, which may be a wrapped segment of the same logical line or the last
-     * segment of the previous logical line.
+     * With {@code WRAP_WORD}/{@code WRAP_CHARACTER}, moves to the previous visual (wrapped)
+     * row, which may be a wrapped segment of the same logical line or the last segment of the
+     * previous logical line. Every other {@link Overflow} value (including {@code null}) is
+     * treated as {@link Overflow#CLIP} and behaves exactly like {@link #moveCursorUp()} (one
+     * logical row) — see {@link #computeDisplayRows}.
      *
      * @param visibleCols the number of visible columns (used to compute wrapped rows)
-     * @param wrap        the wrap mode
+     * @param overflow    the overflow mode
      */
-    public void moveCursorUp(int visibleCols, Overflow wrap) {
-        if (wrap == null || wrap == Overflow.CLIP) {
+    public void moveCursorUp(int visibleCols, Overflow overflow) {
+        if (!isWrapping(overflow)) {
             moveCursorUpClip();
             return;
         }
 
-        List<DisplayRow> rows = computeDisplayRows(visibleCols, wrap);
+        List<DisplayRow> rows = computeDisplayRows(visibleCols, overflow);
         int index = findDisplayRowIndex(rows, cursorRow, cursorCol);
         if (index <= 0) {
             return;
@@ -253,21 +287,22 @@ public final class TextAreaState {
     /**
      * Moves the cursor down one row.
      * <p>
-     * With {@link Overflow#CLIP}, behaves exactly like {@link #moveCursorDown()} (one logical
-     * row). With {@code WRAP_WORD}/{@code WRAP_CHARACTER}, moves to the next visual (wrapped)
-     * row, which may be a wrapped segment of the same logical line or the first segment of the
-     * next logical line.
+     * With {@code WRAP_WORD}/{@code WRAP_CHARACTER}, moves to the next visual (wrapped) row,
+     * which may be a wrapped segment of the same logical line or the first segment of the next
+     * logical line. Every other {@link Overflow} value (including {@code null}) is treated as
+     * {@link Overflow#CLIP} and behaves exactly like {@link #moveCursorDown()} (one logical
+     * row) — see {@link #computeDisplayRows}.
      *
      * @param visibleCols the number of visible columns (used to compute wrapped rows)
-     * @param wrap        the wrap mode
+     * @param overflow    the overflow mode
      */
-    public void moveCursorDown(int visibleCols, Overflow wrap) {
-        if (wrap == null || wrap == Overflow.CLIP) {
+    public void moveCursorDown(int visibleCols, Overflow overflow) {
+        if (!isWrapping(overflow)) {
             moveCursorDownClip();
             return;
         }
 
-        List<DisplayRow> rows = computeDisplayRows(visibleCols, wrap);
+        List<DisplayRow> rows = computeDisplayRows(visibleCols, overflow);
         int index = findDisplayRowIndex(rows, cursorRow, cursorCol);
         if (index < 0 || index >= rows.size() - 1) {
             return;
@@ -326,35 +361,70 @@ public final class TextAreaState {
             this.endCol = endCol;
         }
 
-        /** @return the logical (newline-delimited) line index this row belongs to */
+        /**
+         * Returns the logical (newline-delimited) line index this row belongs to.
+         *
+         * @return the logical line index
+         */
         public int logicalRow() {
             return logicalRow;
         }
 
-        /** @return the char offset (inclusive) where this row starts within its logical line */
+        /**
+         * Returns where this row starts within its logical line.
+         *
+         * @return the inclusive char offset of the row start
+         */
         public int startCol() {
             return startCol;
         }
 
-        /** @return the char offset (exclusive) where this row ends within its logical line */
+        /**
+         * Returns where this row ends within its logical line.
+         *
+         * @return the exclusive char offset of the row end
+         */
         public int endCol() {
             return endCol;
         }
     }
 
     /**
+     * Returns whether {@code overflow} makes a text area wrap.
+     * <p>
+     * Only {@link Overflow#WRAP_WORD} and {@link Overflow#WRAP_CHARACTER} wrap. A text area is
+     * an editor, so the truncating modes ({@code ELLIPSIS}, {@code ELLIPSIS_START},
+     * {@code ELLIPSIS_MIDDLE}) would hide text the caret can still reach; they are treated as
+     * {@link Overflow#CLIP} (horizontal scroll) instead, as is {@code null}.
+     *
+     * @param overflow the overflow mode, may be null
+     * @return true if the mode wraps
+     */
+    static boolean isWrapping(Overflow overflow) {
+        return overflow == Overflow.WRAP_WORD || overflow == Overflow.WRAP_CHARACTER;
+    }
+
+    /**
      * Computes the visual rows produced by wrapping every logical line to {@code visibleWidth}.
      * <p>
-     * With {@link Overflow#CLIP} (or a non-positive width) each logical line maps to exactly
-     * one display row, matching the unwrapped behavior.
+     * Only {@link Overflow#WRAP_WORD} and {@link Overflow#WRAP_CHARACTER} wrap; every other
+     * value (and a non-positive width) maps each logical line to exactly one display row,
+     * matching the unwrapped {@link Overflow#CLIP} behavior. See {@link #isWrapping}.
+     * <p>
+     * The result is cached and reused until the text, the width, or the mode changes, so
+     * calling this several times per frame is cheap.
      *
      * @param visibleWidth the width available for text, in display columns
-     * @param wrap         the wrap mode
-     * @return the display rows, in document order
+     * @param overflow     the overflow mode
+     * @return an unmodifiable list of the display rows, in document order
      */
-    public List<DisplayRow> computeDisplayRows(int visibleWidth, Overflow wrap) {
+    public List<DisplayRow> computeDisplayRows(int visibleWidth, Overflow overflow) {
+        if (cachedVersion == textVersion && cachedWidth == visibleWidth && cachedOverflow == overflow) {
+            return cachedRows;
+        }
+
         List<DisplayRow> result = new ArrayList<>();
-        boolean noWrap = wrap == null || wrap == Overflow.CLIP || visibleWidth <= 0;
+        boolean noWrap = !isWrapping(overflow) || visibleWidth <= 0;
         for (int row = 0; row < lines.size(); row++) {
             String line = lines.get(row).toString();
             if (noWrap) {
@@ -365,14 +435,19 @@ public final class TextAreaState {
                 result.add(new DisplayRow(row, 0, 0));
                 continue;
             }
-            List<int[]> segments = wrap == Overflow.WRAP_WORD
+            List<int[]> segments = overflow == Overflow.WRAP_WORD
                 ? wrapLineByWord(line, visibleWidth)
                 : wrapLineByCharacter(line, visibleWidth);
             for (int[] segment : segments) {
                 result.add(new DisplayRow(row, segment[0], segment[1]));
             }
         }
-        return result;
+
+        cachedRows = Collections.unmodifiableList(result);
+        cachedWidth = visibleWidth;
+        cachedOverflow = overflow;
+        cachedVersion = textVersion;
+        return cachedRows;
     }
 
     private static List<int[]> wrapLineByCharacter(String line, int maxWidth) {
@@ -497,23 +572,24 @@ public final class TextAreaState {
     /**
      * Adjusts scroll offsets to keep the cursor visible.
      * <p>
-     * With {@link Overflow#CLIP}, behaves exactly like {@link #ensureCursorVisible(int, int)}.
      * With {@code WRAP_WORD}/{@code WRAP_CHARACTER}, {@code scrollRow} is treated as an index
      * into the wrapped display rows (see {@link #computeDisplayRows}) and {@code scrollCol} is
-     * always {@code 0}, since a wrapped row always fits within {@code visibleCols}.
+     * always {@code 0}, since a wrapped row always fits within {@code visibleCols}. Every other
+     * {@link Overflow} value (including {@code null}) is treated as {@link Overflow#CLIP} and
+     * behaves exactly like {@link #ensureCursorVisible(int, int)}.
      *
      * @param visibleRows the number of visible rows
      * @param visibleCols the number of visible columns
-     * @param wrap        the wrap mode
+     * @param overflow    the overflow mode
      */
-    public void ensureCursorVisible(int visibleRows, int visibleCols, Overflow wrap) {
-        if (wrap == null || wrap == Overflow.CLIP) {
+    public void ensureCursorVisible(int visibleRows, int visibleCols, Overflow overflow) {
+        if (!isWrapping(overflow)) {
             ensureCursorVisibleClip(visibleRows, visibleCols);
             return;
         }
 
-        List<DisplayRow> rows = computeDisplayRows(visibleCols, wrap);
-        int cursorDisplayIndex = findDisplayRowIndex(rows, cursorRow, cursorCol);
+        List<DisplayRow> rows = computeDisplayRows(visibleCols, overflow);
+        int cursorDisplayIndex = findCursorDisplayRowIndex(rows, cursorRow, cursorCol);
 
         if (cursorDisplayIndex < scrollRow) {
             scrollRow = cursorDisplayIndex;
@@ -548,6 +624,10 @@ public final class TextAreaState {
     /**
      * Finds the index within {@code rows} (as returned by {@link #computeDisplayRows}) of the
      * display row containing the given logical position.
+     * <p>
+     * A position on whitespace consumed by a word-wrap break belongs to no row and resolves to
+     * the row before the break; see {@link #findCursorDisplayRowIndex} for where such a
+     * position is drawn.
      *
      * @param rows       the display rows to search
      * @param logicalRow the logical (newline-delimited) line index
@@ -565,6 +645,26 @@ public final class TextAreaState {
             }
         }
         return best;
+    }
+
+    /**
+     * Like {@link #findDisplayRowIndex}, but resolves where the cursor is actually *drawn*.
+     * <p>
+     * A word-wrap break consumes the whitespace between two rows, so {@code "one two three"} at
+     * width 7 yields {@code [0,7)} and {@code [8,13)} — leaving char offset 7 (the consumed
+     * space, reachable with Left/Right) inside no display row. Such a position is drawn at the
+     * start of the following row, where the caret visually lands.
+     * <p>
+     * Cursor <em>movement</em> deliberately does not snap: {@code moveCursorUp} clamps to offset
+     * 7 as the end of the first visual row, and {@code moveCursorDown} must then return to the
+     * second one.
+     */
+    static int findCursorDisplayRowIndex(List<DisplayRow> rows, int logicalRow, int col) {
+        int index = findDisplayRowIndex(rows, logicalRow, col);
+        if (index + 1 >= rows.size() || col < rows.get(index).endCol()) {
+            return index;
+        }
+        return rows.get(index + 1).logicalRow() == logicalRow ? index + 1 : index;
     }
 
     private static int findScrollColForCursor(String line, int cursorCol, int visibleCols) {
@@ -648,6 +748,7 @@ public final class TextAreaState {
 
     /** Clears all text and resets the cursor and scroll positions. */
     public void clear() {
+        textVersion++;
         lines.clear();
         lines.add(new StringBuilder());
         cursorRow = 0;
@@ -662,6 +763,7 @@ public final class TextAreaState {
      * @param newText the new text content
      */
     public void setText(String newText) {
+        textVersion++;
         lines.clear();
         if (newText == null || newText.isEmpty()) {
             lines.add(new StringBuilder());

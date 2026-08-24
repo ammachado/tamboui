@@ -608,6 +608,71 @@ class TextAreaStateTest {
             assertThat(state.cursorRow()).isEqualTo(1);
             assertThat(state.cursorCol()).isEqualTo(4); // clamped into "four" (length 4)
         }
+
+        @Test
+        @DisplayName("computeDisplayRows treats the truncating overflow modes as CLIP, not as character wrap")
+        void computeDisplayRowsTruncatingModesDoNotWrap() {
+            TextAreaState state = new TextAreaState("one two three");
+
+            for (Overflow truncating : new Overflow[] {
+                Overflow.ELLIPSIS, Overflow.ELLIPSIS_START, Overflow.ELLIPSIS_MIDDLE}) {
+                // A text area can move the caret into hidden text, so truncation makes no sense;
+                // these must fall back to CLIP rather than silently wrapping by character.
+                assertThat(state.computeDisplayRows(7, truncating))
+                    .as("%s", truncating)
+                    .hasSize(1);
+            }
+        }
+
+        @Test
+        @DisplayName("moveCursorDown with a truncating overflow mode moves by logical line, as with CLIP")
+        void moveCursorDownTruncatingModeMovesByLogicalLine() {
+            TextAreaState state = new TextAreaState("one two three\nfour");
+            state.moveCursorToStart();
+
+            state.moveCursorDown(7, Overflow.ELLIPSIS);
+
+            assertThat(state.cursorRow()).isEqualTo(1); // next logical line, not the "three" segment
+            assertThat(state.cursorCol()).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("computeDisplayRows re-wraps after the text changes")
+        void computeDisplayRowsInvalidatedByTextChange() {
+            TextAreaState state = new TextAreaState("one two");
+
+            assertThat(state.computeDisplayRows(7, Overflow.WRAP_WORD)).hasSize(1);
+
+            state.insert(" three"); // cursor is at the end after construction
+
+            assertThat(state.computeDisplayRows(7, Overflow.WRAP_WORD)).hasSize(2);
+        }
+
+        @Test
+        @DisplayName("computeDisplayRows re-wraps when the width or the mode changes")
+        void computeDisplayRowsInvalidatedByWidthOrMode() {
+            TextAreaState state = new TextAreaState("one two three");
+
+            assertThat(state.computeDisplayRows(7, Overflow.WRAP_WORD)).hasSize(2);
+            assertThat(state.computeDisplayRows(20, Overflow.WRAP_WORD)).hasSize(1);
+            assertThat(state.computeDisplayRows(7, Overflow.WRAP_CHARACTER)).hasSize(2);
+            assertThat(state.computeDisplayRows(7, Overflow.CLIP)).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("ensureCursorVisible scrolls to the row where a cursor on consumed wrap whitespace is drawn")
+        void ensureCursorVisibleSnapsCursorOnConsumedWrapBreak() {
+            TextAreaState state = new TextAreaState("one two three");
+            state.moveCursorToEnd();
+            state.moveCursorUp(7, Overflow.WRAP_WORD); // clamps to offset 7, the consumed space
+            assertThat(state.cursorCol()).isEqualTo(7);
+
+            // Only one row visible: the caret is drawn at the start of "three" (display row 1),
+            // so that row -- not "one two" -- has to be the one scrolled into view.
+            state.ensureCursorVisible(1, 7, Overflow.WRAP_WORD);
+
+            assertThat(state.scrollRow()).isEqualTo(1);
+        }
     }
 
     @Nested

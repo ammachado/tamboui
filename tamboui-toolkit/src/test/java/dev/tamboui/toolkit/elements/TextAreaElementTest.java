@@ -13,6 +13,7 @@ import dev.tamboui.css.engine.StyleEngine;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Color;
+import dev.tamboui.style.Overflow;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.toolkit.AbstractElementTest;
@@ -596,6 +597,46 @@ class TextAreaElementTest extends AbstractElementTest {
 
             assertThat(state.cursorRow()).isEqualTo(0); // still logical line 0
             assertThat(state.cursorCol()).isEqualTo(8); // start of "three" segment, not end of doc
+        }
+
+        @Test
+        @DisplayName("Up/Down wrap against the same width the border and gutter left for text")
+        void arrowKeysUseTheRenderedContentWidth() {
+            // 20 wide minus the border (2) and the line-number gutter (4) leaves 14 for text,
+            // so "one two three four five" wraps into "one two three" / "four five".
+            Rect area = new Rect(0, 0, 20, 5);
+            Buffer buffer = Buffer.empty(area);
+            Frame frame = Frame.forTesting(buffer);
+
+            TextAreaState state = new TextAreaState("one two three four five");
+            TextAreaElement element = textArea(state).wrapWord().showLineNumbers().rounded();
+            element.render(frame, area, RenderContext.empty());
+            state.moveCursorToStart();
+
+            assertThat(state.lastRenderedWidth()).isEqualTo(14);
+
+            element.handleKeyEvent(new KeyEvent(KeyCode.DOWN, KeyModifiers.NONE, '\0'), true);
+
+            // Start of "four five": wrapping at the full area width would not have broken at all.
+            assertThat(state.cursorCol()).isEqualTo(14);
+        }
+
+        @Test
+        @DisplayName("A truncating overflow mode falls back to clipping instead of wrapping")
+        void truncatingOverflowFallsBackToClip() {
+            Rect area = new Rect(0, 0, 7, 3);
+            Buffer buffer = Buffer.empty(area);
+            Frame frame = Frame.forTesting(buffer);
+
+            TextAreaState state = new TextAreaState("one two three");
+            state.moveCursorToStart(); // avoid CLIP auto-scrolling to the end-of-text cursor
+
+            textArea(state).overflow(Overflow.ELLIPSIS)
+                .render(frame, area, RenderContext.empty());
+
+            assertThat(buffer.get(0, 0).symbol()).isEqualTo("o");
+            assertThat(buffer.get(0, 1).symbol()).isEqualTo(" "); // no wrap onto row 1
+            assertThat(buffer.get(6, 0).symbol()).isEqualTo("o"); // "one two"[6], not an ellipsis
         }
     }
 }

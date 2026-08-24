@@ -62,13 +62,13 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
     private final Style placeholderStyle;
     private final boolean showLineNumbers;
     private final Style lineNumberStyle;
-    private final Overflow wrap;
+    private final Overflow overflow;
 
     private TextArea(Builder builder) {
         this.block = builder.block;
         this.placeholder = builder.placeholder;
         this.showLineNumbers = builder.showLineNumbers;
-        this.wrap = builder.resolveWrap();
+        this.overflow = builder.resolveOverflow();
 
         // Resolve style-aware properties
         Color resolvedBg = builder.resolveBackground();
@@ -134,26 +134,16 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
             return;
         }
 
-        // Calculate line number gutter width
-        int gutterWidth = 0;
-        if (showLineNumbers) {
-            int lineDigits = String.valueOf(state.lineCount()).length();
-            gutterWidth = Math.max(2, lineDigits) + 2; // digits + space + separator
-        }
-
-        Rect textArea = inputArea;
-        if (gutterWidth > 0 && inputArea.width() > gutterWidth) {
-            textArea = new Rect(
-                inputArea.left() + gutterWidth,
-                inputArea.top(),
-                inputArea.width() - gutterWidth,
-                inputArea.height()
-            );
-        }
+        int gutterWidth = gutterWidth(state);
+        Rect textArea = textAreaRect(inputArea, gutterWidth);
 
         String text = state.text();
         int visibleHeight = textArea.height();
         int visibleWidth = textArea.width();
+
+        // Publish the width actually used, so callers outside the render pass (key handling in
+        // the toolkit element, for one) wrap against the same value instead of recomputing it.
+        state.lastRenderedWidth(visibleWidth);
 
         // Show placeholder if empty
         if (text.isEmpty() && !placeholder.isEmpty()) {
@@ -162,13 +152,35 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
         }
 
         // Ensure cursor is visible
-        state.ensureCursorVisible(visibleHeight, visibleWidth, wrap);
+        state.ensureCursorVisible(visibleHeight, visibleWidth, overflow);
 
-        if (wrap == Overflow.CLIP) {
-            renderClipped(inputArea, textArea, gutterWidth, buffer, state, visibleHeight, visibleWidth);
-        } else {
+        if (TextAreaState.isWrapping(overflow)) {
             renderWrapped(inputArea, textArea, gutterWidth, buffer, state, visibleHeight, visibleWidth);
+        } else {
+            renderClipped(inputArea, textArea, gutterWidth, buffer, state, visibleHeight, visibleWidth);
         }
+    }
+
+    /** Width of the line-number gutter: digits + space + separator, or 0 when hidden. */
+    private int gutterWidth(TextAreaState state) {
+        if (!showLineNumbers) {
+            return 0;
+        }
+        int lineDigits = String.valueOf(state.lineCount()).length();
+        return Math.max(2, lineDigits) + 2;
+    }
+
+    /** The area left for text inside {@code inputArea} once the gutter is carved off. */
+    private static Rect textAreaRect(Rect inputArea, int gutterWidth) {
+        if (gutterWidth <= 0 || inputArea.width() <= gutterWidth) {
+            return inputArea;
+        }
+        return new Rect(
+            inputArea.left() + gutterWidth,
+            inputArea.top(),
+            inputArea.width() - gutterWidth,
+            inputArea.height()
+        );
     }
 
     private void renderClipped(Rect inputArea, Rect textArea, int gutterWidth, Buffer buffer, TextAreaState state,
@@ -213,7 +225,7 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
 
     private void renderWrapped(Rect inputArea, Rect textArea, int gutterWidth, Buffer buffer, TextAreaState state,
                                 int visibleHeight, int visibleWidth) {
-        List<TextAreaState.DisplayRow> rows = state.computeDisplayRows(visibleWidth, wrap);
+        List<TextAreaState.DisplayRow> rows = state.computeDisplayRows(visibleWidth, overflow);
         int scrollRow = state.scrollRow();
 
         for (int y = 0; y < visibleHeight; y++) {
@@ -279,28 +291,25 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
             return;
         }
 
-        int gutterWidth = 0;
-        if (showLineNumbers) {
-            int lineDigits = String.valueOf(state.lineCount()).length();
-            gutterWidth = Math.max(2, lineDigits) + 2;
-        }
-
-        Rect textArea = inputArea;
-        if (gutterWidth > 0 && inputArea.width() > gutterWidth) {
-            textArea = new Rect(
-                inputArea.left() + gutterWidth,
-                inputArea.top(),
-                inputArea.width() - gutterWidth,
-                inputArea.height()
-            );
-        }
+        Rect textArea = textAreaRect(inputArea, gutterWidth(state));
 
         int scrollRow = state.scrollRow();
         int scrollCol = state.scrollCol();
 
         int relativeRow;
         int relativeCol;
-        if (wrap == Overflow.CLIP) {
+        if (TextAreaState.isWrapping(overflow)) {
+            List<TextAreaState.DisplayRow> rows = state.computeDisplayRows(textArea.width(), overflow);
+            int cursorDisplayIndex =
+                TextAreaState.findCursorDisplayRowIndex(rows, state.cursorRow(), state.cursorCol());
+            TextAreaState.DisplayRow row = rows.get(cursorDisplayIndex);
+
+            relativeRow = cursorDisplayIndex - scrollRow;
+            String cursorLine = state.getLine(row.logicalRow());
+            // A cursor snapped forward past a word-wrap break sits before this row's start.
+            int cursorCol = Math.max(row.startCol(), state.cursorCol());
+            relativeCol = CharWidth.of(cursorLine.substring(row.startCol(), cursorCol));
+        } else {
             int cursorRow = state.cursorRow();
             int cursorCol = state.cursorCol();
 
@@ -315,14 +324,6 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
                 int to = Math.min(cursorCol, cursorLine.length());
                 relativeCol = CharWidth.of(cursorLine.substring(from, to));
             }
-        } else {
-            List<TextAreaState.DisplayRow> rows = state.computeDisplayRows(textArea.width(), wrap);
-            int cursorDisplayIndex = TextAreaState.findDisplayRowIndex(rows, state.cursorRow(), state.cursorCol());
-            TextAreaState.DisplayRow row = rows.get(cursorDisplayIndex);
-
-            relativeRow = cursorDisplayIndex - scrollRow;
-            String cursorLine = state.getLine(row.logicalRow());
-            relativeCol = CharWidth.of(cursorLine.substring(row.startCol(), state.cursorCol()));
         }
 
         if (relativeRow >= 0 && relativeRow < textArea.height() &&
@@ -348,7 +349,7 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
         private Style placeholderStyle = Style.EMPTY.dim();
         private boolean showLineNumbers = false;
         private Style lineNumberStyle = Style.EMPTY.dim();
-        private Overflow wrap;
+        private Overflow overflow;
         private StylePropertyResolver styleResolver = StylePropertyResolver.empty();
 
         // Style-aware properties (resolved via styleResolver in build())
@@ -438,17 +439,19 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
         }
 
         /**
-         * Sets the wrap mode.
+         * Sets the overflow (wrap) mode, mirroring {@code Paragraph.Builder.overflow}.
          * <p>
          * {@link Overflow#CLIP} (the default) preserves today's horizontal-scroll behavior.
          * {@code WRAP_WORD}/{@code WRAP_CHARACTER} wrap long lines across multiple screen rows
-         * instead of scrolling horizontally.
+         * instead of scrolling horizontally. The truncating modes ({@code ELLIPSIS},
+         * {@code ELLIPSIS_START}, {@code ELLIPSIS_MIDDLE}) would hide text the caret can still
+         * reach, so a text area falls back to {@code CLIP} for them.
          *
-         * @param wrap the wrap mode
+         * @param overflow the overflow mode
          * @return this builder
          */
-        public Builder wrap(Overflow wrap) {
-            this.wrap = wrap;
+        public Builder overflow(Overflow overflow) {
+            this.overflow = overflow;
             return this;
         }
 
@@ -562,9 +565,11 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
             return styleResolver.resolve(LINE_NUMBER_COLOR, lineNumberColor);
         }
 
-        private Overflow resolveWrap() {
-            Overflow resolved = styleResolver.resolve(StandardProperties.TEXT_OVERFLOW, wrap);
-            return resolved != null ? resolved : Overflow.CLIP;
+        private Overflow resolveOverflow() {
+            Overflow resolved = styleResolver.resolve(StandardProperties.TEXT_OVERFLOW, overflow);
+            // Normalize here so the rest of the widget only ever sees a mode it implements;
+            // `text-overflow: ellipsis` from a shared stylesheet must not silently char-wrap.
+            return TextAreaState.isWrapping(resolved) ? resolved : Overflow.CLIP;
         }
     }
 }
