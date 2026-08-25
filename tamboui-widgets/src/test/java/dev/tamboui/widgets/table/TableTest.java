@@ -276,6 +276,106 @@ class TableTest {
     }
 
     @Test
+    @DisplayName("viewportHeight returns full area height with no chrome")
+    void viewportHeightNoChrome() {
+        Table table = Table.builder()
+            .rows(Arrays.asList(Row.from("Data")))
+            .widths(Constraint.length(10))
+            .build();
+
+        Rect area = new Rect(0, 0, 20, 10);
+        assertThat(table.viewportHeight(area)).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("viewportHeight subtracts block chrome")
+    void viewportHeightWithBlock() {
+        Table table = Table.builder()
+            .rows(Arrays.asList(Row.from("Data")))
+            .widths(Constraint.length(10))
+            .block(Block.bordered())
+            .build();
+
+        Rect area = new Rect(0, 0, 20, 10);
+        // Bordered block takes 2 rows (top + bottom border)
+        assertThat(table.viewportHeight(area)).isEqualTo(8);
+    }
+
+    @Test
+    @DisplayName("viewportHeight subtracts header height")
+    void viewportHeightWithHeader() {
+        Table table = Table.builder()
+            .header(Row.from("Name", "Age"))
+            .rows(Arrays.asList(Row.from("Alice", "30")))
+            .widths(Constraint.length(10), Constraint.length(5))
+            .build();
+
+        Rect area = new Rect(0, 0, 20, 10);
+        // Header takes 1 row
+        assertThat(table.viewportHeight(area)).isEqualTo(9);
+    }
+
+    @Test
+    @DisplayName("viewportHeight subtracts footer height")
+    void viewportHeightWithFooter() {
+        Table table = Table.builder()
+            .rows(Arrays.asList(Row.from("Data")))
+            .footer(Row.from("Total: 1"))
+            .widths(Constraint.length(15))
+            .build();
+
+        Rect area = new Rect(0, 0, 20, 10);
+        // Footer takes 1 row
+        assertThat(table.viewportHeight(area)).isEqualTo(9);
+    }
+
+    @Test
+    @DisplayName("viewportHeight subtracts block, header, and footer")
+    void viewportHeightWithAll() {
+        Table table = Table.builder()
+            .header(Row.from("Name"))
+            .rows(Arrays.asList(Row.from("Data")))
+            .footer(Row.from("Total"))
+            .widths(Constraint.length(10))
+            .block(Block.bordered())
+            .build();
+
+        Rect area = new Rect(0, 0, 20, 10);
+        // Block: 2, header: 1, footer: 1 -> 10 - 4 = 6
+        assertThat(table.viewportHeight(area)).isEqualTo(6);
+    }
+
+    @Test
+    @DisplayName("viewportHeight never returns negative")
+    void viewportHeightNeverNegative() {
+        Table table = Table.builder()
+            .header(Row.from("Name"))
+            .rows(Arrays.asList(Row.from("Data")))
+            .footer(Row.from("Total"))
+            .widths(Constraint.length(10))
+            .block(Block.bordered())
+            .build();
+
+        // Area too small to fit any data rows
+        Rect area = new Rect(0, 0, 20, 2);
+        assertThat(table.viewportHeight(area)).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("viewportHeight with header bottom margin")
+    void viewportHeightWithHeaderMargin() {
+        Table table = Table.builder()
+            .header(Row.from("Name").bottomMargin(1))
+            .rows(Arrays.asList(Row.from("Data")))
+            .widths(Constraint.length(10))
+            .build();
+
+        Rect area = new Rect(0, 0, 20, 10);
+        // Header: height 1 + margin 1 = totalHeight 2
+        assertThat(table.viewportHeight(area)).isEqualTo(8);
+    }
+
+    @Test
     @DisplayName("Table uses HIGHLIGHT_COLOR property from StylePropertyResolver")
     void usesHighlightColorProperty() {
         Table table = Table.builder()
