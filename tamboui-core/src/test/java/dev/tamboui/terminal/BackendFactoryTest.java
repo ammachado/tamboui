@@ -5,6 +5,7 @@
 package dev.tamboui.terminal;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -26,7 +27,7 @@ class BackendFactoryTest {
     @Test
     @DisplayName("resolveProviders skips unavailable provider and falls back to next")
     void resolveProviders_skipsUnavailableProvider() throws Exception {
-        var method = BackendFactory.class.getDeclaredMethod("resolveProviders", String.class, List.class);
+        Method method = BackendFactory.class.getDeclaredMethod("resolveProviders", String.class, List.class);
         method.setAccessible(true);
 
         // Only "beta" is available; "alpha" is not (simulating a provider that
@@ -44,7 +45,7 @@ class BackendFactoryTest {
     @Test
     @DisplayName("resolveProviders preserves order when all providers are available")
     void resolveProviders_preservesOrder() throws Exception {
-        var method = BackendFactory.class.getDeclaredMethod("resolveProviders", String.class, List.class);
+        Method method = BackendFactory.class.getDeclaredMethod("resolveProviders", String.class, List.class);
         method.setAccessible(true);
 
         List<BackendProvider> available = new ArrayList<>();
@@ -62,7 +63,7 @@ class BackendFactoryTest {
     @Test
     @DisplayName("resolveProviders throws when no specified provider is available")
     void resolveProviders_throwsWhenNoneAvailable() throws Exception {
-        var method = BackendFactory.class.getDeclaredMethod("resolveProviders", String.class, List.class);
+        Method method = BackendFactory.class.getDeclaredMethod("resolveProviders", String.class, List.class);
         method.setAccessible(true);
 
         List<BackendProvider> available = new ArrayList<>();
