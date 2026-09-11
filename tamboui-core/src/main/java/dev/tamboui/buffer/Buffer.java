@@ -235,16 +235,17 @@ public final class Buffer {
                     String combined = baseCell.symbol() + new String(Character.toChars(codePoint));
                     set(baseCol, y, baseCell.symbol(combined));
 
-                    // Variation Selector-16 forces emoji (2-wide) presentation. When the base
-                    // glyph was placed as 1-wide (a text-default symbol such as U+2328 keyboard,
-                    // U+23F9 stop or U+23FA record), promote it to occupy two cells so the
-                    // terminal's 2-wide rendering stays in sync with the buffer. Without this the
-                    // following cell is left untracked and stale glyphs remain on screen.
-                    // At the extreme right edge (base on the last column) the loop breaks before
-                    // VS16 is reached, so the glyph degrades to its 1-wide text presentation,
-                    // matching how wide characters truncate at the right edge.
-                    if (codePoint == 0xFE0F && baseCol == col - 1
-                            && col < area.right() && !get(col, y).isContinuation()) {
+                    // Variation Selector-16 forces emoji (2-wide) presentation, but only for
+                    // recognized emoji-variation bases (the same set CharWidth.of(String) uses) -
+                    // e.g. "A" + VS16 stays 1-wide, unlike U+2328 keyboard or U+23F9 stop. When the
+                    // base glyph qualifies, promote it to occupy two cells so the terminal's 2-wide
+                    // rendering stays in sync with the buffer. The next cell is claimed even if it
+                    // already held an unrelated (e.g. stale) continuation, so it isn't left for the
+                    // following character to clobber. At the extreme right edge (base on the last
+                    // column) the loop breaks before VS16 is reached, so the glyph degrades to its
+                    // 1-wide text presentation, matching how wide characters truncate at the right edge.
+                    if (codePoint == 0xFE0F && baseCol == col - 1 && col < area.right()
+                            && CharWidth.isEmojiVariationBase(baseCell.symbol().codePointAt(0))) {
                         set(col, y, Cell.CONTINUATION);
                         col++;
                     }

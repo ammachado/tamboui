@@ -265,6 +265,41 @@ class BufferWideCharTest {
     }
 
     @Test
+    @DisplayName("VS16 after a non-emoji base does not promote to two cells")
+    void vs16AfterNonEmojiBaseStaysOneCell() {
+        Buffer buffer = Buffer.empty(new Rect(0, 0, 10, 1));
+        // 'A' is not a recognized emoji-variation base, so VS16 must not reserve
+        // a continuation cell for it (unlike the real keyboard/stop/record cases above).
+        int endCol = buffer.setString(0, 0, "A️B", Style.EMPTY);
+
+        assertThat(endCol).isEqualTo(2);
+        assertThat(buffer.get(0, 0).symbol()).isEqualTo("A️");
+        assertThat(buffer.get(0, 0).isContinuation()).isFalse();
+        assertThat(buffer.get(1, 0).isContinuation()).isFalse();
+        assertThat(buffer.get(1, 0).symbol()).isEqualTo("B");
+    }
+
+    @Test
+    @DisplayName("Emoji presentation sequence reuses a stale continuation cell and still advances")
+    void emojiPresentationSequenceReusesStaleContinuation() {
+        Buffer buffer = Buffer.empty(new Rect(0, 0, 10, 1));
+        // Column 1 starts out as a continuation cell belonging to a previously
+        // rendered wide char ("世").
+        buffer.setString(0, 0, "世", Style.EMPTY);
+
+        // Overwrite column 0 with a promoted emoji presentation sequence followed
+        // by more text. The stale continuation at column 1 must be reclaimed for
+        // the new sequence, and the cursor must still advance past it so "X"
+        // doesn't overwrite the just-combined base cell.
+        int endCol = buffer.setString(0, 0, "⌨️X", Style.EMPTY);
+
+        assertThat(buffer.get(0, 0).symbol()).isEqualTo("⌨️");
+        assertThat(buffer.get(1, 0).isContinuation()).isTrue();
+        assertThat(buffer.get(2, 0).symbol()).isEqualTo("X");
+        assertThat(endCol).isEqualTo(3);
+    }
+
+    @Test
     @DisplayName("Multiple flag emoji render correctly")
     void multipleFlagEmojiRenderCorrectly() {
         Buffer buffer = Buffer.empty(new Rect(0, 0, 10, 1));

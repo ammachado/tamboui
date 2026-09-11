@@ -152,6 +152,24 @@ class CharWidthTest {
     }
 
     @Test
+    @DisplayName("VS16 after a non-emoji base stays width 1")
+    void vs16AfterNonEmojiBaseStaysWidth1() {
+        // 'A' is not a recognized emoji-variation base, so VS16 does not widen it.
+        assertThat(CharWidth.of("A️")).isEqualTo(1);
+        assertThat(CharWidth.of("A️B")).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("substringByWidth and substringByWidthFromEnd keep an emoji presentation sequence intact")
+    void substringByWidthKeepsEmojiPresentationSequenceAtomic() {
+        // "A⌨️B" = widths [1, 2, 1], total 4
+        assertThat(CharWidth.substringByWidth("A⌨️B", 2)).isEqualTo("A");
+        assertThat(CharWidth.substringByWidth("A⌨️B", 3)).isEqualTo("A⌨️");
+        assertThat(CharWidth.substringByWidthFromEnd("A⌨️B", 2)).isEqualTo("B");
+        assertThat(CharWidth.substringByWidthFromEnd("A⌨️B", 3)).isEqualTo("⌨️B");
+    }
+
+    @Test
     @DisplayName("Already-wide emoji with VS16 stays width 2")
     void alreadyWideEmojiWithVariationSelectorWidth() {
         // 🖥️ = U+1F5A5 (already 2-wide) + U+FE0F must not become 4-wide
