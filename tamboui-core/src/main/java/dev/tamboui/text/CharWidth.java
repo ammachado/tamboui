@@ -337,6 +337,9 @@ public final class CharWidth {
      * Returns true if the code point is a recognized emoji-variation base: a
      * character for which Unicode defines both a text-style and emoji-style
      * variation sequence (see {@link #EMOJI_VARIATION_BASES}).
+     *
+     * @param codePoint the Unicode code point to check
+     * @return true if the code point is a recognized emoji-variation base
      */
     public static boolean isEmojiVariationBase(int codePoint) {
         return Arrays.binarySearch(EMOJI_VARIATION_BASES, codePoint) >= 0;
