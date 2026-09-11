@@ -4,7 +4,6 @@
  */
 package dev.tamboui.toolkit.app;
 
-import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.time.Duration;
@@ -415,11 +414,14 @@ public final class ToolkitRunner implements AutoCloseable {
 
     /**
      * Sets the terminal window title.
+     * <p>
+     * The first call saves the current title on the terminal's title stack;
+     * it is restored automatically when the runner is closed.
      *
      * @param title the window title to set
-     * @throws IOException if the operation fails
+     * @throws dev.tamboui.error.RuntimeIOException if the operation fails
      */
-    public void setWindowTitle(String title) throws IOException {
+    public void setWindowTitle(String title) {
         tuiRunner.setWindowTitle(title);
     }
 

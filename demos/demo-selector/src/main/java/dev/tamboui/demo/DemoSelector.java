@@ -5,7 +5,6 @@
 package dev.tamboui.demo;
 
 import java.io.File;
-import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -78,10 +77,7 @@ public class DemoSelector extends ToolkitApp {
 
     @Override
     protected void onStart() {
-        try {
-            setWindowTitle("TamboUI Demo Selector");
-        } catch (IOException ignored) {
-        }
+        setWindowTitle("TamboUI Demo Selector");
         discoverDemos();
         // Expand all modules by default
         expandedModules.addAll(demosByModule.keySet());
