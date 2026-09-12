@@ -61,6 +61,25 @@ class BackendFactoryTest {
     }
 
     @Test
+    @DisplayName("resolveProviders matches a fully qualified provider class name")
+    void resolveProviders_matchesFullyQualifiedClassName() throws Exception {
+        Method method = BackendFactory.class.getDeclaredMethod("resolveProviders", String.class, List.class);
+        method.setAccessible(true);
+
+        // The class JavaDoc documents selection by FQCN, e.g.
+        // tamboui.backend=dev.tamboui.backend.jline.JLineBackendProvider
+        List<BackendProvider> available = new ArrayList<>();
+        available.add(new StubBackendProvider("alpha"));
+
+        @SuppressWarnings("unchecked")
+        List<BackendProvider> resolved = (List<BackendProvider>) method.invoke(
+                null, StubBackendProvider.class.getName(), available);
+
+        assertThat(resolved).hasSize(1);
+        assertThat(resolved.get(0).name()).isEqualTo("alpha");
+    }
+
+    @Test
     @DisplayName("resolveProviders throws when no specified provider is available")
     void resolveProviders_throwsWhenNoneAvailable() throws Exception {
         Method method = BackendFactory.class.getDeclaredMethod("resolveProviders", String.class, List.class);
