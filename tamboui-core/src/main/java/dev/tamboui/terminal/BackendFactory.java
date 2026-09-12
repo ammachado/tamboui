@@ -7,6 +7,7 @@ package dev.tamboui.terminal;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 import dev.tamboui.internal.record.RecordingBackend;
@@ -155,9 +156,18 @@ public final class BackendFactory {
             if (!loadFailures.isEmpty() && allProviders.isEmpty()) {
                 throw brokenProvidersException(loadFailures);
             }
+            // Mixed case: a healthy provider exists, but the ones the user asked for may still
+            // be broken rather than absent. ServiceLoader reports failed providers through
+            // ServiceConfigurationError messages containing the provider class name, so failures
+            // can be attributed to the requested spec entries.
+            List<Throwable> attributed = failuresMentioning(providerSpec, loadFailures);
+            if (!attributed.isEmpty()) {
+                throw requestedProvidersBrokenException(providerSpec, attributed, allProviders);
+            }
             throw new BackendException(
                     "No BackendProvider found on classpath for any of the specified providers: '" + providerSpec + "'.\n"
                             + "Available providers: " + formatAvailableProviders(allProviders) + "\n"
+                            + loadFailureNote(loadFailures)
                             + "Add a backend dependency such as tamboui-jline3-backend or tamboui-panama-backend.");
         }
         return resolved;
@@ -199,6 +209,87 @@ public final class BackendFactory {
                         "Tried: " + formatAvailableProviders(providers) + "\n" +
                         "Errors:\n" + errors
         );
+    }
+
+    /**
+     * Returns the load failures whose messages mention an entry of the provider specification.
+     * ServiceLoader wraps a provider that fails to load in a {@link java.util.ServiceConfigurationError}
+     * whose message contains the provider's fully qualified class name, which also embeds the
+     * simple-name-derived provider name (see {@link BackendProvider#name()}).
+     *
+     * @param providerSpec the user-supplied provider specification (may be comma-separated)
+     * @param loadFailures errors raised while discovering/instantiating providers
+     * @return the failures attributable to the requested providers, possibly empty
+     */
+    private static List<Throwable> failuresMentioning(String providerSpec, List<Throwable> loadFailures) {
+        List<Throwable> matches = new ArrayList<>();
+        for (Throwable failure : loadFailures) {
+            for (String spec : providerSpec.split(",")) {
+                String needle = spec.trim().toLowerCase(Locale.ROOT);
+                if (!needle.isEmpty() && mentions(failure, needle)) {
+                    matches.add(failure);
+                    break;
+                }
+            }
+        }
+        return matches;
+    }
+
+    /**
+     * Formats a disclosure note for providers that were found on the classpath but dropped
+     * because they failed to load, so they are never silently hidden from error messages
+     * (e.g. when the user mistyped the name of a present-but-incompatible provider).
+     *
+     * @param loadFailures errors raised while discovering/instantiating providers
+     * @return a note ending in a newline, or an empty string when there were no failures
+     */
+    private static String loadFailureNote(List<Throwable> loadFailures) {
+        if (loadFailures.isEmpty()) {
+            return "";
+        }
+        String detail = loadFailures.stream()
+                .map(t -> "  " + t.getMessage())
+                .collect(Collectors.joining("\n"));
+        return "Note: " + loadFailures.size() + " additional provider(s) were found but "
+                + "could not be loaded on this JVM:\n" + detail + "\n";
+    }
+
+    private static boolean mentions(Throwable failure, String needle) {
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            String message = t.getMessage();
+            if (message != null && message.toLowerCase(Locale.ROOT).contains(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Builds the exception for requested providers that are present on the classpath but failed
+     * to initialize while other, unrelated providers are healthy. Reports the real causes instead
+     * of advising to add a dependency that is already present.
+     *
+     * @param providerSpec the user-supplied provider specification
+     * @param attributed   the non-empty failures attributed to the requested providers
+     * @param allProviders the successfully instantiated providers
+     * @return a {@link BackendException} reporting the failures
+     */
+    private static BackendException requestedProvidersBrokenException(
+            String providerSpec, List<Throwable> attributed, List<BackendProvider> allProviders) {
+        String detail = attributed.stream()
+                .map(t -> "  " + t.getMessage())
+                .collect(Collectors.joining("\n"));
+        BackendException exception = new BackendException(
+                "BackendProvider(s) matching '" + providerSpec + "' were found on the classpath but "
+                        + "could not be initialized (see cause).\nFailures:\n" + detail + "\n"
+                        + "Available providers: " + formatAvailableProviders(allProviders) + "\n"
+                        + "Use a compatible Java runtime, or append a working fallback to the list, e.g. "
+                        + "-Dtamboui.backend=" + providerSpec + "," + allProviders.get(0).name(),
+                attributed.get(0));
+        for (int i = 1; i < attributed.size(); i++) {
+            exception.addSuppressed(attributed.get(i));
+        }
+        return exception;
     }
 
     /**

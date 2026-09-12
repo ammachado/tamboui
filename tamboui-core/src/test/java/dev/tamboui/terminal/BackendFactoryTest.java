@@ -34,6 +34,7 @@ class BackendFactoryTest {
 
     private static final String SERVICE = "dev.tamboui.terminal.BackendProvider";
     private static final String BROKEN_PROVIDER = "dev.tamboui.terminal.ThrowingBackendProvider";
+    private static final String WORKING_PROVIDER = "dev.tamboui.capability.test.TestBackendProvider";
 
     private String savedBackendProperty;
 
@@ -154,6 +155,58 @@ class BackendFactoryTest {
                 .hasMessageContaining("ThrowingBackendProvider")
                 .hasMessageNotContaining("Add a backend dependency");
         assertThat(rootCause(thrown)).isInstanceOf(NoClassDefFoundError.class);
+    }
+
+    @Test
+    void requestedProviderBrokenWhileAnotherWorks_reportsRealCause(@TempDir Path tempDir) {
+        // Mixed case: the requested provider is present on the classpath but fails to
+        // initialize, while an unrelated provider is healthy. The error must surface the
+        // real failure instead of advising to add a dependency that is already present.
+        System.setProperty("tamboui.backend", "throwing");
+        ClassLoader mixed = new IsolatedServiceClassLoader(
+                getClass().getClassLoader(), SERVICE, tempDir, BROKEN_PROVIDER, WORKING_PROVIDER);
+
+        Throwable thrown = catchThrowable(() -> BackendFactory.create(mixed));
+
+        assertThat(thrown)
+                .isInstanceOf(BackendException.class)
+                .hasMessageContaining("ThrowingBackendProvider")
+                .hasMessageNotContaining("Add a backend dependency");
+        assertThat(rootCause(thrown)).isInstanceOf(NoClassDefFoundError.class);
+    }
+
+    @Test
+    void unknownProvider_notesUnrelatedLoadFailures(@TempDir Path tempDir) {
+        // The user asked for a provider that simply does not exist, while another provider on
+        // the classpath failed to load. The error should keep the "add a dependency" advice for
+        // the unknown name, but also disclose the dropped provider so it is not silently hidden
+        // (e.g. a typo of a provider that IS present but incompatible with this JVM).
+        System.setProperty("tamboui.backend", "bogus");
+        ClassLoader mixed = new IsolatedServiceClassLoader(
+                getClass().getClassLoader(), SERVICE, tempDir, BROKEN_PROVIDER, WORKING_PROVIDER);
+
+        Throwable thrown = catchThrowable(() -> BackendFactory.create(mixed));
+
+        assertThat(thrown)
+                .isInstanceOf(BackendException.class)
+                .hasMessageContaining("'bogus'")
+                .hasMessageContaining("Available providers: test")
+                .hasMessageContaining("could not be loaded on this JVM")
+                .hasMessageContaining("ThrowingBackendProvider")
+                .hasMessageContaining("Add a backend dependency");
+    }
+
+    @Test
+    void requestedProviderBrokenWithFallback_fallsBackSilently(@TempDir Path tempDir) throws Exception {
+        // Preference order with fallback (#422): the broken first choice is skipped and the
+        // healthy second choice is used, no exception.
+        System.setProperty("tamboui.backend", "throwing,test");
+        ClassLoader mixed = new IsolatedServiceClassLoader(
+                getClass().getClassLoader(), SERVICE, tempDir, BROKEN_PROVIDER, WORKING_PROVIDER);
+
+        try (Backend backend = BackendFactory.create(mixed)) {
+            assertThat(backend).isNotNull();
+        }
     }
 
     @Test
