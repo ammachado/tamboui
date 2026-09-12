@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
+import dev.tamboui.error.RuntimeIOException;
 import dev.tamboui.inline.InlineDisplay;
 import dev.tamboui.layout.Size;
 import dev.tamboui.terminal.Backend;
@@ -73,6 +74,7 @@ public final class InlineTuiRunner implements AutoCloseable {
     private final BlockingQueue<Event> eventQueue;
     private final AtomicBoolean running;
     private final AtomicBoolean cleanedUp;
+    private final AtomicBoolean windowTitleSet = new AtomicBoolean(false);
     private final ScheduledExecutorService scheduler;
     private final boolean schedulerOwned;
     private final AtomicLong frameCount;
@@ -361,6 +363,27 @@ public final class InlineTuiRunner implements AutoCloseable {
     }
 
     /**
+     * Sets the terminal window title.
+     * <p>
+     * The first call saves the current title on the terminal's title stack;
+     * it is restored automatically when the runner is closed.
+     *
+     * @param title the window title to set
+     * @throws RuntimeIOException if the operation fails
+     */
+    public void setWindowTitle(String title) {
+        try {
+            if (windowTitleSet.compareAndSet(false, true)) {
+                backend.saveWindowTitle();
+            }
+            backend.setWindowTitle(title);
+            backend.flush();
+        } catch (IOException e) {
+            throw new RuntimeIOException("Failed to set window title: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * Draws the UI using the given renderer.
      *
      * @param renderer the render function
@@ -466,6 +489,13 @@ public final class InlineTuiRunner implements AutoCloseable {
         if (config.bracketedPaste()) {
             try {
                 backend.disableBracketedPaste();
+            } catch (Exception ignored) {
+            }
+        }
+
+        if (windowTitleSet.get()) {
+            try {
+                backend.restoreWindowTitle();
             } catch (Exception ignored) {
             }
         }

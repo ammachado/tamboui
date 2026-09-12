@@ -117,6 +117,21 @@ public abstract class ToolkitApp {
     }
 
     /**
+     * Sets the terminal window title.
+     * <p>
+     * The first call saves the current title on the terminal's title stack;
+     * it is restored automatically when the application exits.
+     *
+     * @param title the window title to set
+     * @throws dev.tamboui.error.RuntimeIOException if the operation fails
+     */
+    protected void setWindowTitle(String title) {
+        if (runner != null) {
+            runner.setWindowTitle(title);
+        }
+    }
+
+    /**
      * Signals the application to quit.
      */
     protected void quit() {

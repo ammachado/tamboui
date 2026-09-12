@@ -118,6 +118,46 @@ public final class AnsiStringBuilder {
     }
 
     /**
+     * Generates an OSC 2 escape sequence to set the terminal window title.
+     * <p>
+     * Format: {@code \033]2;title\007}
+     * <p>
+     * Control characters (ESC and BEL) are stripped from the title to prevent
+     * sequence injection or premature termination.
+     *
+     * @param title the window title to set
+     * @return the OSC 2 escape sequence
+     */
+    public static String windowTitle(String title) {
+        String safeTitle = title.replace("\u001b", "").replace("\u0007", "");
+        return ESC + "]2;" + safeTitle + "\u0007";
+    }
+
+    /**
+     * Generates an XTWINOPS escape sequence to push the current window title
+     * onto the terminal's title stack ({@code CSI 22;2t}).
+     * <p>
+     * Terminals without title-stack support ignore this sequence.
+     *
+     * @return the save window title escape sequence
+     */
+    public static String saveWindowTitle() {
+        return ESC + "[22;2t";
+    }
+
+    /**
+     * Generates an XTWINOPS escape sequence to pop the window title from the
+     * terminal's title stack ({@code CSI 23;2t}), restoring the previously saved title.
+     * <p>
+     * Terminals without title-stack support ignore this sequence.
+     *
+     * @return the restore window title escape sequence
+     */
+    public static String restoreWindowTitle() {
+        return ESC + "[23;2t";
+    }
+
+    /**
      * Escapes special characters in OSC parameter values.
      * <p>
      * According to the OSC8 specification, semicolons and backslashes need to be escaped.

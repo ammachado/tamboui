@@ -413,6 +413,19 @@ public final class ToolkitRunner implements AutoCloseable {
     }
 
     /**
+     * Sets the terminal window title.
+     * <p>
+     * The first call saves the current title on the terminal's title stack;
+     * it is restored automatically when the runner is closed.
+     *
+     * @param title the window title to set
+     * @throws dev.tamboui.error.RuntimeIOException if the operation fails
+     */
+    public void setWindowTitle(String title) {
+        tuiRunner.setWindowTitle(title);
+    }
+
+    /**
      * Returns the underlying TuiRunner.
      *
      * @return the TuiRunner

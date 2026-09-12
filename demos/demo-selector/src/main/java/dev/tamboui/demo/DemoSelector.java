@@ -77,6 +77,7 @@ public class DemoSelector extends ToolkitApp {
 
     @Override
     protected void onStart() {
+        setWindowTitle("TamboUI Demo Selector");
         discoverDemos();
         // Expand all modules by default
         expandedModules.addAll(demosByModule.keySet());

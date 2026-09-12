@@ -326,6 +326,42 @@ public interface Backend extends AutoCloseable {
     }
 
     /**
+     * Sets the terminal window title.
+     * <p>
+     * Uses the OSC 2 escape sequence ({@code ESC]2;title BEL}).
+     *
+     * @param title the window title to set
+     * @throws IOException if the operation fails
+     */
+    default void setWindowTitle(String title) throws IOException {
+        writeRaw(AnsiStringBuilder.windowTitle(title));
+    }
+
+    /**
+     * Saves the current window title on the terminal's title stack.
+     * <p>
+     * Uses the XTWINOPS sequence ({@code CSI 22;2t}). Terminals without
+     * title-stack support ignore this sequence.
+     *
+     * @throws IOException if the operation fails
+     */
+    default void saveWindowTitle() throws IOException {
+        writeRaw(AnsiStringBuilder.saveWindowTitle());
+    }
+
+    /**
+     * Restores the window title previously saved with {@link #saveWindowTitle()}.
+     * <p>
+     * Uses the XTWINOPS sequence ({@code CSI 23;2t}). Terminals without
+     * title-stack support ignore this sequence.
+     *
+     * @throws IOException if the operation fails
+     */
+    default void restoreWindowTitle() throws IOException {
+        writeRaw(AnsiStringBuilder.restoreWindowTitle());
+    }
+
+    /**
      * Moves the cursor to the beginning of the current line (carriage return).
      *
      * @throws IOException if the operation fails

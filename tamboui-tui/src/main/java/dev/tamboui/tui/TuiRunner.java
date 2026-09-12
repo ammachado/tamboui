@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import dev.tamboui.buffer.Buffer;
+import dev.tamboui.error.RuntimeIOException;
 import dev.tamboui.error.TamboUIException;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.layout.Size;
@@ -78,6 +79,7 @@ public final class TuiRunner implements AutoCloseable {
     private final BlockingQueue<Event> eventQueue;
     private final AtomicBoolean running;
     private final AtomicBoolean cleanedUp;
+    private final AtomicBoolean windowTitleSet = new AtomicBoolean(false);
     private final ScheduledExecutorService scheduler;
     private final boolean schedulerOwned;
     private final AtomicLong frameCount;
@@ -614,6 +616,27 @@ public final class TuiRunner implements AutoCloseable {
     }
 
     /**
+     * Sets the terminal window title.
+     * <p>
+     * The first call saves the current title on the terminal's title stack;
+     * it is restored automatically when the runner is closed.
+     *
+     * @param title the window title to set
+     * @throws RuntimeIOException if the operation fails
+     */
+    public void setWindowTitle(String title) {
+        try {
+            if (windowTitleSet.compareAndSet(false, true)) {
+                backend.saveWindowTitle();
+            }
+            backend.setWindowTitle(title);
+            backend.flush();
+        } catch (IOException e) {
+            throw new RuntimeIOException("Failed to set window title: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * Returns the shared scheduler for scheduling tasks.
      * <p>
      * This scheduler runs on a dedicated daemon thread. Tasks scheduled here
@@ -741,6 +764,9 @@ public final class TuiRunner implements AutoCloseable {
 
         // Restore terminal state
         try {
+            if (windowTitleSet.get()) {
+                backend.restoreWindowTitle();
+            }
             if (config.bracketedPaste()) {
                 backend.disableBracketedPaste();
             }

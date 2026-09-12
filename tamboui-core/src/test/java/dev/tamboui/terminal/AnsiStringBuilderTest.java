@@ -116,4 +116,30 @@ class AnsiStringBuilderTest {
         assertThat(result).isEqualTo("\u001b]8;;\u001b\\");
     }
 
+    @Test
+    @DisplayName("windowTitle sequence")
+    void windowTitleSequence() {
+        String result = AnsiStringBuilder.windowTitle("My App");
+        assertThat(result).isEqualTo("\u001b]2;My App\u0007");
+    }
+
+    @Test
+    @DisplayName("windowTitle strips ESC and BEL to prevent injection")
+    void windowTitleStripsControlCharacters() {
+        String result = AnsiStringBuilder.windowTitle("evil\u0007\u001b]2;spoofed");
+        assertThat(result).isEqualTo("\u001b]2;evil]2;spoofed\u0007");
+    }
+
+    @Test
+    @DisplayName("saveWindowTitle sequence")
+    void saveWindowTitleSequence() {
+        assertThat(AnsiStringBuilder.saveWindowTitle()).isEqualTo("\u001b[22;2t");
+    }
+
+    @Test
+    @DisplayName("restoreWindowTitle sequence")
+    void restoreWindowTitleSequence() {
+        assertThat(AnsiStringBuilder.restoreWindowTitle()).isEqualTo("\u001b[23;2t");
+    }
+
 }
