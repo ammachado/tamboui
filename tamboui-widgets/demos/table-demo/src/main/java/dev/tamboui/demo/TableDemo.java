@@ -29,6 +29,8 @@ import dev.tamboui.widgets.block.BorderType;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.block.Title;
 import dev.tamboui.widgets.paragraph.Paragraph;
+import dev.tamboui.widgets.scrollbar.Scrollbar;
+import dev.tamboui.widgets.scrollbar.ScrollbarState;
 import dev.tamboui.widgets.table.Cell;
 import dev.tamboui.widgets.table.Row;
 import dev.tamboui.widgets.table.Table;
@@ -56,6 +58,7 @@ public class TableDemo {
 
     private boolean running = true;
     private final TableState tableState = new TableState();
+    private final ScrollbarState scrollState = new ScrollbarState(DATA.size());
 
     private TableDemo() {
 
@@ -239,6 +242,17 @@ public class TableDemo {
             .build();
 
         frame.renderStatefulWidget(table, area, tableState);
+
+        // Size the scrollbar with viewportHeight, which accounts for the
+        // block borders and the header row. Overlay it on the right border
+        // beside the data rows (below top border + header).
+        int viewportHeight = table.viewportHeight(area);
+        if (viewportHeight > 0 && DATA.size() > viewportHeight) {
+            scrollState.viewportContentLength(viewportHeight)
+                .position(tableState.offset());
+            Rect scrollbarArea = new Rect(area.right() - 1, area.top() + 2, 1, viewportHeight);
+            frame.renderStatefulWidget(Scrollbar.vertical(), scrollbarArea, scrollState);
+        }
     }
 
     private void renderDetails(Frame frame, Rect area) {
