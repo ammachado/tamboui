@@ -179,33 +179,20 @@ public final class TuiRunner implements AutoCloseable {
 
     /**
      * Creates a TuiRunner with the specified configuration.
+     * <p>
+     * When the config supplies neither an explicit {@link TuiConfig#backend()} nor a
+     * {@link TuiConfig#backendClassLoader()}, the backend is discovered using the default
+     * candidate classloaders. A non-null {@code backendClassLoader} is used exclusively
+     * for backend discovery.
      *
      * @param config the configuration to use
      * @return a new TuiRunner
      * @throws Exception if terminal initialization fails
      */
     public static TuiRunner create(TuiConfig config) throws Exception {
-        return create(config, null);
-    }
-
-    /**
-     * Creates a TuiRunner with the specified configuration, discovering the backend using the
-     * given classloader.
-     * <p>
-     * When {@code classLoader} is non-null it is used exclusively for backend discovery, taking
-     * precedence over {@link TuiConfig#backendClassLoader()}. When both are null, discovery uses
-     * the default candidate classloaders. Ignored when the config supplies an explicit
-     * {@link TuiConfig#backend()}.
-     *
-     * @param config      the configuration to use
-     * @param classLoader the classloader to use exclusively for backend discovery, or null
-     * @return a new TuiRunner
-     * @throws Exception if terminal initialization fails
-     */
-    public static TuiRunner create(TuiConfig config, ClassLoader classLoader) throws Exception {
         Backend backend = config.backend() != null
                 ? config.backend()
-                : BackendFactory.create(resolveBackendClassLoader(config, classLoader));
+                : BackendFactory.create(config.backendClassLoader());
 
         try {
             if (config.rawMode()) {
@@ -230,18 +217,6 @@ public final class TuiRunner implements AutoCloseable {
             backend.close();
             throw e;
         }
-    }
-
-    /**
-     * Resolves which classloader to use for backend discovery: the explicit argument when
-     * non-null, otherwise the config's {@link TuiConfig#backendClassLoader()} (which may be null).
-     *
-     * @param config   the configuration
-     * @param explicit the explicit classloader argument, or null
-     * @return the classloader to use for discovery, or null for the default candidate set
-     */
-    static ClassLoader resolveBackendClassLoader(TuiConfig config, ClassLoader explicit) {
-        return explicit != null ? explicit : config.backendClassLoader();
     }
 
     /**
