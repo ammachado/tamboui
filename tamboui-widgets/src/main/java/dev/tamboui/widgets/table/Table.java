@@ -203,14 +203,7 @@ public final class Table implements StatefulWidget<TableState> {
 
         // Ensure selected row is visible
         if (state.selected() != null) {
-            int visibleHeight = tableArea.height();
-            if (header != null) {
-                visibleHeight -= header.totalHeight();
-            }
-            if (footer != null) {
-                visibleHeight -= footer.totalHeight();
-            }
-            state.scrollToSelected(visibleHeight, rows);
+            state.scrollToSelected(viewportHeight(area), rows);
         }
 
         int y = tableArea.top();
