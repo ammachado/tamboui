@@ -1,0 +1,116 @@
+= Terminal Backends
+:doctype: book
+:icons: font
+:source-highlighter: highlight.js
+:toc: left
+:toclevels: 3
+
+include::_attributes.adoc[]
+
+{project-name} talks to the terminal through a pluggable `Backend`. Backends are discovered
+via `ServiceLoader`, so adding one is just a dependency:
+
+[cols="1,2,1"]
+|===
+|Module |Description |Requires
+
+|`tamboui-jline3-backend`
+|JLine 3 based backend; the reliable default on all platforms
+|Java 8+
+
+|`tamboui-panama-backend`
+|Panama (FFM) backend with no third-party dependencies
+|Java 22+
+
+|`tamboui-aesh-backend`
+|Aesh based backend, e.g. for SSH/browser-hosted terminals
+|Java 8+
+|===
+
+An application can ship several backends at once. `tamboui-panama-backend` is safe to include
+in applications that also run on older JVMs: on a runtime older than Java 22 its provider is
+skipped during discovery.
+
+== Selecting a backend
+
+By default, `BackendFactory.create()` auto-discovers providers on the classpath and uses the
+first one that successfully creates a backend. To control the choice, set the
+`tamboui.backend` system property or the `TAMBOUI_BACKEND` environment variable:
+
+[source,shell]
+----
+# by simple name
+java -Dtamboui.backend=jline3 ...
+
+# by fully qualified provider class name
+java -Dtamboui.backend=dev.tamboui.backend.jline3.JLineBackendProvider ...
+
+# preference order with fallback: try panama, fall back to jline3
+# (e.g. when the same application runs on both Java 21 and Java 22+)
+java -Dtamboui.backend=panama,jline3 ...
+----
+
+A comma-separated list is a *preference order*: entries that are not usable on the current
+JVM are skipped, and the first usable provider wins. An error is raised only when none of
+the listed providers can be used.
+
+Embedders that manage their own classloaders (plugin systems, app servers) can pin discovery
+to a specific loader via `TuiConfig`:
+
+[source,java]
+----
+TuiConfig config = TuiConfig.builder()
+    .backendClassLoader(pluginClassLoader)
+    .build();
+----
+
+== Troubleshooting
+
+Run the diagnostic entry point of `tamboui-core` with your application's classpath to see
+what is discovered on the current JVM, including providers that failed to load:
+
+[source,shell]
+----
+jbang dev.tamboui:tamboui-core:{revnumber}
+# or: java -cp <your-classpath> dev.tamboui.Main
+----
+
+[source]
+----
+java.version: 21.0.9
+tamboui.backend: <unset>
+backend.provider_count: 1
+backend.provider_names: jline3
+backend.provider_error.0: dev/tamboui/backend/panama/PanamaBackendProvider has been compiled
+  by a more recent version of the Java Runtime (class file version 66.0), ...
+----
+
+Selection errors distinguish three situations:
+
+*The requested provider exists but cannot load on this JVM* — the real cause is reported,
+with a hint to add a fallback:
+
+[source]
+----
+BackendProvider(s) matching 'panama' were found on the classpath but could not be initialized (see cause).
+Failures:
+  dev/tamboui/backend/panama/PanamaBackendProvider has been compiled by a more recent version ...
+Available providers: jline3 (dev.tamboui.backend.jline3.JLineBackendProvider)
+Use a compatible Java runtime, or append a working fallback to the list, e.g. -Dtamboui.backend=panama,jline3
+----
+
+*The requested name matches nothing* — usable providers are listed, and providers that were
+found but dropped are disclosed so a typo of a present-but-incompatible backend is not
+mistaken for a missing dependency:
+
+[source]
+----
+No BackendProvider found on classpath for any of the specified providers: 'bogus'.
+Available providers: jline3 (dev.tamboui.backend.jline3.JLineBackendProvider)
+Note: 1 additional provider(s) were found but could not be loaded on this JVM:
+  dev/tamboui/backend/panama/PanamaBackendProvider has been compiled by a more recent version ...
+Add a backend dependency such as tamboui-jline3-backend or tamboui-panama-backend.
+----
+
+*No provider loads at all* — each failure is reported with its cause (the first as the
+exception cause, the rest as suppressed exceptions).
