@@ -1,4 +1,4 @@
-= Session Recording and Scripted Playback
+= Recording & Playback
 :doctype: book
 :icons: font
 :source-highlighter: highlight.js
