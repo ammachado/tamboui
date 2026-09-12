@@ -201,6 +201,121 @@ class BufferWideCharTest {
     }
 
     @Test
+    @DisplayName("Emoji presentation sequence (base + VS16) occupies two cells")
+    void emojiPresentationSequenceOccupiesTwoCells() {
+        Buffer buffer = Buffer.empty(new Rect(0, 0, 10, 1));
+        // \u2328\uFE0F = keyboard (U+2328) + Variation Selector-16 (U+FE0F).
+        // The base glyph is 1-wide on its own but renders as a 2-wide emoji with VS16.
+        String keyboard = "\u2328\uFE0F";
+        int endCol = buffer.setString(0, 0, keyboard, Style.EMPTY);
+
+        assertThat(endCol).isEqualTo(2);
+        assertThat(buffer.get(0, 0).symbol()).isEqualTo(keyboard);
+        assertThat(buffer.get(1, 0).isContinuation()).isTrue();
+        assertThat(buffer.get(2, 0).symbol()).isEqualTo(" ");
+    }
+
+    @Test
+    @DisplayName("Emoji presentation sequence does not leave stale cells when text follows")
+    void emojiPresentationSequenceWithTrailingText() {
+        Buffer buffer = Buffer.empty(new Rect(0, 0, 20, 1));
+        // "\u23FA\uFE0F Rec" : record (U+23FA) + VS16, space, then text.
+        String label = "\u23FA\uFE0F Rec";
+        buffer.setString(0, 0, label, Style.EMPTY);
+
+        assertThat(buffer.get(0, 0).symbol()).isEqualTo("\u23FA\uFE0F");
+        assertThat(buffer.get(1, 0).isContinuation()).isTrue();
+        assertThat(buffer.get(2, 0).symbol()).isEqualTo(" ");
+        assertThat(buffer.get(3, 0).symbol()).isEqualTo("R");
+        assertThat(buffer.get(4, 0).symbol()).isEqualTo("e");
+        assertThat(buffer.get(5, 0).symbol()).isEqualTo("c");
+    }
+
+    @Test
+    @DisplayName("Already-wide emoji with VS16 stays two cells")
+    void alreadyWideEmojiWithVariationSelectorStaysTwoCells() {
+        Buffer buffer = Buffer.empty(new Rect(0, 0, 10, 1));
+        // \uD83D\uDDA5\uFE0F = desktop computer (U+1F5A5, already 2-wide) + VS16 must stay 2-wide
+        String desktop = "\uD83D\uDDA5\uFE0F";
+        int endCol = buffer.setString(0, 0, desktop, Style.EMPTY);
+
+        assertThat(endCol).isEqualTo(2);
+        assertThat(buffer.get(0, 0).symbol()).isEqualTo(desktop);
+        assertThat(buffer.get(1, 0).isContinuation()).isTrue();
+        assertThat(buffer.get(2, 0).symbol()).isEqualTo(" ");
+    }
+
+    @Test
+    @DisplayName("Emoji presentation sequence at the right edge degrades to its 1-wide base")
+    void emojiPresentationSequenceAtRightEdgeTruncates() {
+        Buffer buffer = Buffer.empty(new Rect(0, 0, 2, 1));
+        // The base glyph (U+2328) lands on the last column, so the loop breaks before
+        // VS16 is reached. Rather than overflowing or leaving a stale continuation, the
+        // glyph degrades to its 1-wide text presentation, matching how wide characters
+        // truncate at the right edge. This documents the one boundary where setString's
+        // return value (1 column consumed) intentionally differs from CharWidth.of (2).
+        int endCol = buffer.setString(1, 0, "⌨️", Style.EMPTY);
+
+        assertThat(endCol).isEqualTo(2);
+        // Only the base glyph (U+2328) is placed; VS16 is never appended.
+        assertThat(buffer.get(1, 0).symbol()).isEqualTo("⌨");
+        assertThat(buffer.get(1, 0).isContinuation()).isFalse();
+        // The cell to the left is untouched (still empty).
+        assertThat(buffer.get(0, 0).symbol()).isEqualTo(" ");
+    }
+
+    @Test
+    @DisplayName("VS16 after a non-emoji base does not promote to two cells")
+    void vs16AfterNonEmojiBaseStaysOneCell() {
+        Buffer buffer = Buffer.empty(new Rect(0, 0, 10, 1));
+        // 'A' is not a recognized emoji-variation base, so VS16 must not reserve
+        // a continuation cell for it (unlike the real keyboard/stop/record cases above).
+        int endCol = buffer.setString(0, 0, "A️B", Style.EMPTY);
+
+        assertThat(endCol).isEqualTo(2);
+        assertThat(buffer.get(0, 0).symbol()).isEqualTo("A️");
+        assertThat(buffer.get(0, 0).isContinuation()).isFalse();
+        assertThat(buffer.get(1, 0).isContinuation()).isFalse();
+        assertThat(buffer.get(1, 0).symbol()).isEqualTo("B");
+    }
+
+    @Test
+    @DisplayName("ZWJ sequence embedding a variation base stays a single 2-wide cell")
+    void zwjSequenceWithVariationBaseStaysSingleCell() {
+        Buffer buffer = Buffer.empty(new Rect(0, 0, 10, 1));
+        // U+26F9 U+FE0F U+200D U+2640 U+FE0F = person bouncing ball, female.
+        // The leading base+VS16 is promoted to 2 cells; the ZWJ tail (U+2640 U+FE0F)
+        // must append to the base cell without a second promotion or drift.
+        String sequence = "\u26F9\uFE0F\u200D\u2640\uFE0F";
+        int endCol = buffer.setString(0, 0, sequence + "X", Style.EMPTY);
+
+        assertThat(buffer.get(0, 0).symbol()).isEqualTo(sequence);
+        assertThat(buffer.get(1, 0).isContinuation()).isTrue();
+        assertThat(buffer.get(2, 0).symbol()).isEqualTo("X");
+        assertThat(endCol).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("Emoji presentation sequence reuses a stale continuation cell and still advances")
+    void emojiPresentationSequenceReusesStaleContinuation() {
+        Buffer buffer = Buffer.empty(new Rect(0, 0, 10, 1));
+        // Column 1 starts out as a continuation cell belonging to a previously
+        // rendered wide char ("世").
+        buffer.setString(0, 0, "世", Style.EMPTY);
+
+        // Overwrite column 0 with a promoted emoji presentation sequence followed
+        // by more text. The stale continuation at column 1 must be reclaimed for
+        // the new sequence, and the cursor must still advance past it so "X"
+        // doesn't overwrite the just-combined base cell.
+        int endCol = buffer.setString(0, 0, "⌨️X", Style.EMPTY);
+
+        assertThat(buffer.get(0, 0).symbol()).isEqualTo("⌨️");
+        assertThat(buffer.get(1, 0).isContinuation()).isTrue();
+        assertThat(buffer.get(2, 0).symbol()).isEqualTo("X");
+        assertThat(endCol).isEqualTo(3);
+    }
+
+    @Test
     @DisplayName("Multiple flag emoji render correctly")
     void multipleFlagEmojiRenderCorrectly() {
         Buffer buffer = Buffer.empty(new Rect(0, 0, 10, 1));

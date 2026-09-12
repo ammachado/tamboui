@@ -135,6 +135,61 @@ class CharWidthTest {
     }
 
     @Test
+    @DisplayName("Emoji presentation sequence (base + VS16) has width 2")
+    void emojiPresentationSequenceWidth() {
+        // Base glyphs that are 1-wide on their own but render as 2-wide emoji
+        // when followed by Variation Selector-16 (U+FE0F).
+        // U+2328 keyboard alone is 1-wide
+        assertThat(CharWidth.of(0x2328)).isEqualTo(1);
+        // ⌨️ = U+2328 + U+FE0F (keyboard)
+        assertThat(CharWidth.of("⌨️")).isEqualTo(2);
+        // ⏹️ = U+23F9 + U+FE0F (stop)
+        assertThat(CharWidth.of("⏹️")).isEqualTo(2);
+        // ⏺️ = U+23FA + U+FE0F (record)
+        assertThat(CharWidth.of("⏺️")).isEqualTo(2);
+        // Surrounding text keeps its own width: "A⌨️B" = 1 + 2 + 1 = 4
+        assertThat(CharWidth.of("A⌨️B")).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("ZWJ sequences embedding variation bases stay width 2")
+    void zwjSequencesWithVariationBasesStayWidth2() {
+        // U+2695 (staff of aesculapius) and U+2640 (female sign) are emoji-variation
+        // bases, but inside a ZWJ sequence they join the preceding glyph instead of
+        // forming their own 2-wide unit.
+        // \uD83D\uDC69 U+200D U+2695 U+FE0F = woman health worker (VS16 after ZWJ'd base)
+        assertThat(CharWidth.of("\uD83D\uDC69\u200D\u2695\uFE0F")).isEqualTo(2);
+        // U+26F9 U+FE0F U+200D U+2640 U+FE0F = person bouncing ball, female
+        // (VS16 before AND after the ZWJ)
+        assertThat(CharWidth.of("\u26F9\uFE0F\u200D\u2640\uFE0F")).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("VS16 after a non-emoji base stays width 1")
+    void vs16AfterNonEmojiBaseStaysWidth1() {
+        // 'A' is not a recognized emoji-variation base, so VS16 does not widen it.
+        assertThat(CharWidth.of("A️")).isEqualTo(1);
+        assertThat(CharWidth.of("A️B")).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("substringByWidth and substringByWidthFromEnd keep an emoji presentation sequence intact")
+    void substringByWidthKeepsEmojiPresentationSequenceAtomic() {
+        // "A⌨️B" = widths [1, 2, 1], total 4
+        assertThat(CharWidth.substringByWidth("A⌨️B", 2)).isEqualTo("A");
+        assertThat(CharWidth.substringByWidth("A⌨️B", 3)).isEqualTo("A⌨️");
+        assertThat(CharWidth.substringByWidthFromEnd("A⌨️B", 2)).isEqualTo("B");
+        assertThat(CharWidth.substringByWidthFromEnd("A⌨️B", 3)).isEqualTo("⌨️B");
+    }
+
+    @Test
+    @DisplayName("Already-wide emoji with VS16 stays width 2")
+    void alreadyWideEmojiWithVariationSelectorWidth() {
+        // 🖥️ = U+1F5A5 (already 2-wide) + U+FE0F must not become 4-wide
+        assertThat(CharWidth.of("🖥️")).isEqualTo(2);
+    }
+
+    @Test
     @DisplayName("Null and empty string have width 0")
     void nullAndEmptyWidth() {
         assertThat(CharWidth.of((String) null)).isEqualTo(0);
