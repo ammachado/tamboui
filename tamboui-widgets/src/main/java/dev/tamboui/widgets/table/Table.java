@@ -143,6 +143,31 @@ public final class Table implements StatefulWidget<TableState> {
         return rows;
     }
 
+    /**
+     * Computes the number of data rows visible in the given area.
+     * <p>
+     * This accounts for the vertical space consumed by the optional
+     * {@link Block} chrome (borders, titles, padding), the header row,
+     * and the footer row. The result is the height available for data
+     * rows and can be used by consumers that render their own scrollbar.
+     *
+     * @param area the total area the table will be rendered into
+     * @return the number of rows available for data content, never negative
+     */
+    public int viewportHeight(Rect area) {
+        int height = area.height();
+        if (block != null) {
+            height -= block.verticalChrome();
+        }
+        if (header != null) {
+            height -= header.totalHeight();
+        }
+        if (footer != null) {
+            height -= footer.totalHeight();
+        }
+        return Math.max(0, height);
+    }
+
     @Override
     public void render(Rect area, Buffer buffer, TableState state) {
         if (area.isEmpty()) {
@@ -178,14 +203,7 @@ public final class Table implements StatefulWidget<TableState> {
 
         // Ensure selected row is visible
         if (state.selected() != null) {
-            int visibleHeight = tableArea.height();
-            if (header != null) {
-                visibleHeight -= header.totalHeight();
-            }
-            if (footer != null) {
-                visibleHeight -= footer.totalHeight();
-            }
-            state.scrollToSelected(visibleHeight, rows);
+            state.scrollToSelected(viewportHeight(area), rows);
         }
 
         int y = tableArea.top();
