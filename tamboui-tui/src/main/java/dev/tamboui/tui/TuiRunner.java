@@ -190,8 +190,10 @@ public final class TuiRunner implements AutoCloseable {
      * @throws Exception if terminal initialization fails
      */
     public static TuiRunner create(TuiConfig config) throws Exception {
+        // An explicitly configured backend still has to be wrapped for recording; BackendFactory
+        // only does that for the backends it creates itself
         Backend backend = config.backend() != null
-                ? config.backend()
+                ? BackendFactory.recordIfEnabled(config.backend())
                 : BackendFactory.create(config.backendClassLoader());
 
         try {

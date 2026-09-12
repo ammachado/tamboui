@@ -51,14 +51,18 @@ public final class RecordingConfig {
         }
 
         String output = System.getProperty(PREFIX);
-        if (output == null) {
+        String configPath = System.getProperty(PREFIX + ".config");
+        if (output == null && configPath == null) {
             return null; // Recording disabled
         }
 
-        String configPath = System.getProperty(PREFIX + ".config");
+        // Naming an input tape is the explicit act; when no output is given, derive the
+        // cast path from the tape name (script.tape -> script.cast) so a single property
+        // is enough to drive-and-record.
+        Path outputPath = output != null ? Paths.get(output) : deriveCastPath(Paths.get(configPath));
 
         RecordingConfig config = new RecordingConfig(
-                Paths.get(output),
+                outputPath,
                 Integer.getInteger(PREFIX + ".fps", 10),
                 Integer.getInteger(PREFIX + ".duration", 10000),
                 Integer.getInteger(PREFIX + ".width", 80),
@@ -95,7 +99,22 @@ public final class RecordingConfig {
      * @return true if recording is configured
      */
     public static boolean isEnabled() {
-        return System.getProperty(PREFIX) != null;
+        return System.getProperty(PREFIX) != null || System.getProperty(PREFIX + ".config") != null;
+    }
+
+    /**
+     * Derives the cast output path from a config/tape path by replacing its extension
+     * with {@code .cast}, e.g. {@code demo/script.tape} becomes {@code demo/script.cast}.
+     *
+     * @param configFile the config/tape file path
+     * @return the derived cast output path in the same directory
+     */
+    private static Path deriveCastPath(Path configFile) {
+        String name = configFile.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        String castName = (dot > 0 ? name.substring(0, dot) : name) + ".cast";
+        Path parent = configFile.getParent();
+        return parent != null ? parent.resolve(castName) : Paths.get(castName);
     }
 
     /**
