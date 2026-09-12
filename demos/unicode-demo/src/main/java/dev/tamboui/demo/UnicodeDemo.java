@@ -111,26 +111,32 @@ public class UnicodeDemo {
     private void render(Frame frame) {
         Rect area = frame.area();
 
+        // Main region height = sum of the section heights (7+6+6+5), so the
+        // VS16 list on the right is locked to the same height as the panes.
+        List<Rect> regions = Layout.vertical().constraints(
+                Constraint.length(24), // Sections + VS16 list
+                Constraint.length(1),  // Footer
+                Constraint.fill()
+        ).split(area);
+
         List<Rect> columns = Layout.horizontal().constraints(
                 Constraint.fill(),
                 Constraint.length(34)  // VS16 selection list
-        ).split(area);
+        ).split(regions.get(0));
 
         List<Rect> rows = Layout.vertical().constraints(
                 Constraint.length(7),  // Emoji
                 Constraint.length(6),  // CJK
                 Constraint.length(6),  // Arabic
-                Constraint.length(5),  // Mixed
-                Constraint.length(1),  // Footer
-                Constraint.fill()
+                Constraint.length(5)   // Mixed
         ).split(columns.get(0));
 
         renderEmojiSection(frame, rows.get(0));
         renderCjkSection(frame, rows.get(1));
         renderArabicSection(frame, rows.get(2));
         renderMixedSection(frame, rows.get(3));
-        renderFooter(frame, rows.get(4));
         renderVs16List(frame, columns.get(1));
+        renderFooter(frame, regions.get(1));
     }
 
     private void renderVs16List(Frame frame, Rect area) {
