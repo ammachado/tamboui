@@ -25,6 +25,9 @@ import dev.tamboui.text.Text;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.BorderType;
 import dev.tamboui.widgets.block.Borders;
+import dev.tamboui.widgets.list.ListItem;
+import dev.tamboui.widgets.list.ListState;
+import dev.tamboui.widgets.list.ListWidget;
 import dev.tamboui.widgets.paragraph.Paragraph;
 
 /**
@@ -40,7 +43,24 @@ import dev.tamboui.widgets.paragraph.Paragraph;
  */
 public class UnicodeDemo {
 
+    // Items starting with an emoji presentation sequence (1-wide base + VS16):
+    // the terminal renders these 2-wide, so any width miscounting shows up as
+    // stale characters when the selection moves over them (j/k).
+    private static final List<String> VS16_ITEMS = List.of(
+            "\u23FA\uFE0F Record",
+            "\u23F9\uFE0F Stop",
+            "\u23EF\uFE0F Play/Pause",
+            "\u2328\uFE0F Keyboard",
+            "\u260E\uFE0F Phone",
+            "\u2702\uFE0F Scissors",
+            "\u2708\uFE0F Airplane",
+            "\u26A0\uFE0F Warning",
+            "\u2764\uFE0F Heart",
+            "\uD83D\uDD25 Fire (plain wide emoji)",
+            "A Plain ASCII item");
+
     private boolean running = true;
+    private final ListState listState = new ListState();
 
     private UnicodeDemo() {
 
@@ -72,12 +92,17 @@ public class UnicodeDemo {
                 terminal.draw(this::render);
             });
 
+            listState.selectFirst();
+
             while (running) {
                 terminal.draw(this::render);
 
                 int c = backend.read(100);
-                if (c == 'q' || c == 'Q' || c == 3) {
-                    running = false;
+                switch (c) {
+                    case 'q', 'Q', 3 -> running = false;
+                    case 'j', 'J' -> listState.selectNext(VS16_ITEMS.size());
+                    case 'k', 'K' -> listState.selectPrevious();
+                    default -> { }
                 }
             }
         }
@@ -86,6 +111,11 @@ public class UnicodeDemo {
     private void render(Frame frame) {
         Rect area = frame.area();
 
+        List<Rect> columns = Layout.horizontal().constraints(
+                Constraint.fill(),
+                Constraint.length(34)  // VS16 selection list
+        ).split(area);
+
         List<Rect> rows = Layout.vertical().constraints(
                 Constraint.length(7),  // Emoji
                 Constraint.length(6),  // CJK
@@ -93,13 +123,28 @@ public class UnicodeDemo {
                 Constraint.length(5),  // Mixed
                 Constraint.length(1),  // Footer
                 Constraint.fill()
-        ).split(area);
+        ).split(columns.get(0));
 
         renderEmojiSection(frame, rows.get(0));
         renderCjkSection(frame, rows.get(1));
         renderArabicSection(frame, rows.get(2));
         renderMixedSection(frame, rows.get(3));
         renderFooter(frame, rows.get(4));
+        renderVs16List(frame, columns.get(1));
+    }
+
+    private void renderVs16List(Frame frame, Rect area) {
+        ListWidget list = ListWidget.builder()
+                .items(VS16_ITEMS.stream().map(ListItem::from).toArray(ListItem[]::new))
+                .highlightStyle(Style.EMPTY.bg(Color.BLUE).fg(Color.WHITE).bold())
+                .highlightSymbol("\u25B6 ")
+                .block(Block.builder()
+                        .borders(Borders.ALL)
+                        .borderType(BorderType.ROUNDED)
+                        .title("VS16 emoji (j/k)")
+                        .build())
+                .build();
+        frame.renderStatefulWidget(list, area, listState);
     }
 
     private void renderEmojiSection(Frame frame, Rect area) {
@@ -177,6 +222,8 @@ public class UnicodeDemo {
     private void renderFooter(Frame frame, Rect area) {
         Paragraph footer = Paragraph.builder()
                 .text(Text.from(Line.from(
+                        Span.styled("j/k", Style.EMPTY.fg(Color.YELLOW).bold()),
+                        Span.styled(" Select  ", Style.EMPTY.fg(Color.DARK_GRAY)),
                         Span.styled("q", Style.EMPTY.fg(Color.YELLOW).bold()),
                         Span.styled(" Quit", Style.EMPTY.fg(Color.DARK_GRAY))
                 )))

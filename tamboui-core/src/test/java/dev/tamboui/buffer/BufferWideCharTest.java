@@ -280,6 +280,22 @@ class BufferWideCharTest {
     }
 
     @Test
+    @DisplayName("ZWJ sequence embedding a variation base stays a single 2-wide cell")
+    void zwjSequenceWithVariationBaseStaysSingleCell() {
+        Buffer buffer = Buffer.empty(new Rect(0, 0, 10, 1));
+        // U+26F9 U+FE0F U+200D U+2640 U+FE0F = person bouncing ball, female.
+        // The leading base+VS16 is promoted to 2 cells; the ZWJ tail (U+2640 U+FE0F)
+        // must append to the base cell without a second promotion or drift.
+        String sequence = "\u26F9\uFE0F\u200D\u2640\uFE0F";
+        int endCol = buffer.setString(0, 0, sequence + "X", Style.EMPTY);
+
+        assertThat(buffer.get(0, 0).symbol()).isEqualTo(sequence);
+        assertThat(buffer.get(1, 0).isContinuation()).isTrue();
+        assertThat(buffer.get(2, 0).symbol()).isEqualTo("X");
+        assertThat(endCol).isEqualTo(3);
+    }
+
+    @Test
     @DisplayName("Emoji presentation sequence reuses a stale continuation cell and still advances")
     void emojiPresentationSequenceReusesStaleContinuation() {
         Buffer buffer = Buffer.empty(new Rect(0, 0, 10, 1));

@@ -152,6 +152,19 @@ class CharWidthTest {
     }
 
     @Test
+    @DisplayName("ZWJ sequences embedding variation bases stay width 2")
+    void zwjSequencesWithVariationBasesStayWidth2() {
+        // U+2695 (staff of aesculapius) and U+2640 (female sign) are emoji-variation
+        // bases, but inside a ZWJ sequence they join the preceding glyph instead of
+        // forming their own 2-wide unit.
+        // \uD83D\uDC69 U+200D U+2695 U+FE0F = woman health worker (VS16 after ZWJ'd base)
+        assertThat(CharWidth.of("\uD83D\uDC69\u200D\u2695\uFE0F")).isEqualTo(2);
+        // U+26F9 U+FE0F U+200D U+2640 U+FE0F = person bouncing ball, female
+        // (VS16 before AND after the ZWJ)
+        assertThat(CharWidth.of("\u26F9\uFE0F\u200D\u2640\uFE0F")).isEqualTo(2);
+    }
+
+    @Test
     @DisplayName("VS16 after a non-emoji base stays width 1")
     void vs16AfterNonEmojiBaseStaysWidth1() {
         // 'A' is not a recognized emoji-variation base, so VS16 does not widen it.
