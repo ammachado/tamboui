@@ -41,6 +41,7 @@ public final class MarkdownDemo {
 
     private final String fullSource;
     private int scroll;
+    private int maxScroll;
     private int streamLength;
     private boolean streaming;
     private boolean running = true;
@@ -135,6 +136,9 @@ public final class MarkdownDemo {
             .block(frameBlock)
             .scroll(scroll)
             .build();
+        // Max scroll = total rows minus viewport height; block chrome is included
+        // in both computeHeight and the frame area, so it cancels out.
+        maxScroll = Math.max(0, view.computeHeight(frame.area().width()) - frame.area().height());
         frame.renderWidget(view, frame.area());
     }
 
@@ -147,7 +151,7 @@ public final class MarkdownDemo {
                 break;
             case 'j':
             case 'J':
-                scroll++;
+                scroll = Math.min(scroll + 1, maxScroll);
                 break;
             case 'k':
             case 'K':

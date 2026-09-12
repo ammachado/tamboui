@@ -11,6 +11,7 @@ import dev.tamboui.assertj.BufferAssertions;
 import dev.tamboui.buffer.Buffer;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Modifier;
+import dev.tamboui.widgets.block.Block;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -316,7 +317,7 @@ class MarkdownViewTest {
         MarkdownView plain = MarkdownView.builder().source("# Title").build();
         MarkdownView boxed = MarkdownView.builder()
             .source("# Title")
-            .block(dev.tamboui.widgets.block.Block.bordered())
+            .block(Block.bordered())
             .build();
 
         // ALL borders add 2 rows of vertical chrome.
@@ -369,6 +370,22 @@ class MarkdownViewTest {
         BufferAssertions.assertThat(buf)
             .hasSymbolAt(0, 0, "h")
             .hasSymbolAt(4, 0, "o");
+    }
+
+    @Test
+    @DisplayName("computeHeight supports deriving max scroll, with and without block chrome")
+    void computeHeightDerivesMaxScroll() {
+        // 5 content rows: "line one" / blank / "line two" / blank / "line three"
+        String source = "line one\n\nline two\n\nline three";
+        MarkdownView plain = MarkdownView.builder().source(source).build();
+        MarkdownView bordered = MarkdownView.builder().source(source).block(Block.bordered()).build();
+
+        // maxScroll = computeHeight(width) - viewportHeight (chrome cancels out)
+        assertThat(Math.max(0, plain.computeHeight(30) - 3)).isEqualTo(2);
+        assertThat(Math.max(0, plain.computeHeight(30) - 5)).isEqualTo(0);
+        // 5 content rows + 2 border rows = 7 total; viewport 5 -> content area 3 -> max 2
+        assertThat(Math.max(0, bordered.computeHeight(30) - 5)).isEqualTo(2);
+        assertThat(Math.max(0, bordered.computeHeight(30) - 7)).isEqualTo(0);
     }
 
     @Test
