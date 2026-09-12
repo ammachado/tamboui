@@ -91,6 +91,7 @@ Feedback, issues, and contributions are welcome!
 
 * link:getting-started.html[Getting Started] - Installation and hello world
 * link:core-concepts.html[Core Concepts] - Architecture and primitives
+* link:backends.html[Terminal Backends] - Backend selection and troubleshooting
 * link:api-levels.html[API Levels] - Immediate mode, TuiRunner, Toolkit DSL, Inline Display
 
 == Building Blocks
