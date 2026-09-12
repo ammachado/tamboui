@@ -92,11 +92,12 @@ class TextAreaTest {
         Style cursorStyle = Style.EMPTY.reversed();
         TextArea textArea = TextArea.builder().overflow(Overflow.WRAP_WORD).cursorStyle(cursorStyle).build();
         TextAreaState state = new TextAreaState("one two three");
-        state.moveCursorToEnd();
-        // Up clamps into the first visual row "one two" [0,7): offset 7 is the space the wrap
-        // consumed, so it belongs to no display row and must be drawn at the start of "three".
-        state.moveCursorUp(7, Overflow.WRAP_WORD);
-        assertThat(state.cursorCol()).isEqualTo(7);
+        state.moveCursorToStart();
+        // Offset 7 is the space the wrap consumed between "one two" [0,7) and "three" [8,13).
+        // "one two" fills the 7-wide area, so the caret must be drawn at the start of "three".
+        for (int i = 0; i < 7; i++) {
+            state.moveCursorRight();
+        }
 
         Buffer buffer = Buffer.empty(new Rect(0, 0, 7, 3));
         Frame frame = Frame.forTesting(buffer);
@@ -104,6 +105,78 @@ class TextAreaTest {
         textArea.renderWithCursor(buffer.area(), buffer, state, frame);
 
         assertThat(buffer.get(0, 1).style()).isEqualTo(cursorStyle);
+    }
+
+    @Test
+    @DisplayName("renderWithCursor draws a cursor at a word-wrap break right after the row's text when it fits")
+    void renderWithCursorAtWordWrapBreakWithRoom() {
+        Style cursorStyle = Style.EMPTY.reversed();
+        TextArea textArea = TextArea.builder().overflow(Overflow.WRAP_WORD).cursorStyle(cursorStyle).build();
+        TextAreaState state = new TextAreaState("ab cdefgh"); // "ab" [0,2) / "cdefgh" [3,9) at width 6
+        state.moveCursorToStart();
+        state.moveCursorRight();
+        state.moveCursorRight(); // "ab|"
+
+        Buffer buffer = Buffer.empty(new Rect(0, 0, 6, 3));
+        Frame frame = Frame.forTesting(buffer);
+
+        textArea.renderWithCursor(buffer.area(), buffer, state, frame);
+
+        // "ab" leaves room on its row, so the caret stays there instead of jumping to "cdefgh".
+        assertThat(buffer.get(2, 0).style()).isEqualTo(cursorStyle);
+        assertThat(buffer.get(0, 1).style()).isNotEqualTo(cursorStyle);
+    }
+
+    @Test
+    @DisplayName("renderWithCursor keeps the caret visible after whitespace typed at a full row")
+    void renderWithCursorAfterTrailingWhitespaceAtWrapWidth() {
+        Style cursorStyle = Style.EMPTY.reversed();
+        TextArea textArea = TextArea.builder().overflow(Overflow.WRAP_WORD).cursorStyle(cursorStyle).build();
+        TextAreaState state = new TextAreaState("one two "); // cursor at the end, offset 8
+
+        Buffer buffer = Buffer.empty(new Rect(0, 0, 7, 3));
+        Frame frame = Frame.forTesting(buffer);
+
+        textArea.renderWithCursor(buffer.area(), buffer, state, frame);
+
+        // "one two" fills row 0; the caret goes to the start of row 1, where typing continues.
+        assertThat(buffer.get(0, 1).style()).isEqualTo(cursorStyle);
+    }
+
+    @Test
+    @DisplayName("renderWithCursor keeps the caret visible at the end of a line that exactly fills the width")
+    void renderWithCursorAtEndOfFullLine() {
+        Style cursorStyle = Style.EMPTY.reversed();
+        TextArea textArea = TextArea.builder().overflow(Overflow.WRAP_CHARACTER).cursorStyle(cursorStyle).build();
+        TextAreaState state = new TextAreaState("abcdefg"); // cursor at the end, offset 7
+
+        Buffer buffer = Buffer.empty(new Rect(0, 0, 7, 3));
+        Frame frame = Frame.forTesting(buffer);
+
+        textArea.renderWithCursor(buffer.area(), buffer, state, frame);
+
+        assertThat(buffer.get(0, 1).style()).isEqualTo(cursorStyle);
+    }
+
+    @Test
+    @DisplayName("preferredHeight counts wrapped rows plus the block, using the render's gutter math")
+    void preferredHeightFitsWrappedText() {
+        TextArea.Builder builder = TextArea.builder()
+            .showLineNumbers(true)
+            .block(Block.builder().borders(Borders.ALL).build());
+        TextAreaState state = new TextAreaState("one two three four five");
+
+        // 20 - 2 (border) - 4 (gutter) = 14 for text: "one two three" / "four five", + 2 border rows.
+        int wrapped = builder.overflow(Overflow.WRAP_WORD).build().preferredHeight(20, state);
+        assertThat(wrapped).isEqualTo(4);
+        // Without wrapping the single logical line is one row, + 2 border rows.
+        assertThat(builder.overflow(Overflow.CLIP).build().preferredHeight(20, state)).isEqualTo(3);
+
+        // Rendering at exactly that height shows the whole text, down to the last word.
+        TextArea textArea = builder.overflow(Overflow.WRAP_WORD).build();
+        Buffer buffer = Buffer.empty(new Rect(0, 0, 20, wrapped));
+        textArea.render(buffer.area(), buffer, state);
+        assertThat(extractRegion(buffer, 2, 5, 14)).isEqualTo("four five");
     }
 
     @Test

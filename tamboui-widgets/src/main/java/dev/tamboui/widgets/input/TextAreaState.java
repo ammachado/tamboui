@@ -265,11 +265,11 @@ public final class TextAreaState {
         }
 
         List<DisplayRow> rows = computeDisplayRows(visibleCols, overflow);
-        int index = findDisplayRowIndex(rows, cursorRow, cursorCol);
+        int index = findCursorDisplayRowIndex(rows, visibleCols);
         if (index <= 0) {
             return;
         }
-        moveCursorToDisplayRow(rows.get(index - 1));
+        moveCursorToDisplayRow(rows, index, index - 1, visibleCols);
     }
 
     private void moveCursorUpClip() {
@@ -303,11 +303,11 @@ public final class TextAreaState {
         }
 
         List<DisplayRow> rows = computeDisplayRows(visibleCols, overflow);
-        int index = findDisplayRowIndex(rows, cursorRow, cursorCol);
+        int index = findCursorDisplayRowIndex(rows, visibleCols);
         if (index < 0 || index >= rows.size() - 1) {
             return;
         }
-        moveCursorToDisplayRow(rows.get(index + 1));
+        moveCursorToDisplayRow(rows, index, index + 1, visibleCols);
     }
 
     private void moveCursorDownClip() {
@@ -317,9 +317,38 @@ public final class TextAreaState {
         }
     }
 
-    private void moveCursorToDisplayRow(DisplayRow target) {
+    /**
+     * Moves the cursor from display row {@code fromIndex} (where it is drawn) to display row
+     * {@code toIndex}, keeping it in the same screen column.
+     */
+    private void moveCursorToDisplayRow(List<DisplayRow> rows, int fromIndex, int toIndex, int visibleCols) {
+        DisplayRow from = rows.get(fromIndex);
+        String fromLine = getLine(from.logicalRow());
+        // Same column math as TextArea.renderWithCursor, so the caret moves from where it is seen.
+        int fromCol = Math.max(from.startCol(), Math.min(cursorCol, fromLine.length()));
+        int column = CharWidth.of(fromLine.substring(from.startCol(), fromCol));
+
+        DisplayRow target = rows.get(toIndex);
+        StringBuilder targetLine = lines.get(target.logicalRow());
+        int offset = target.startCol();
+        int width = 0;
+        while (offset < target.endCol()) {
+            int next = GraphemeClusters.clusterEnd(targetLine, offset);
+            int clusterWidth = CharWidth.of(targetLine.substring(offset, next));
+            if (width + clusterWidth > column) {
+                break;
+            }
+            width += clusterWidth;
+            offset = next;
+        }
         cursorRow = target.logicalRow();
-        cursorCol = Math.max(target.startCol(), Math.min(cursorCol, target.endCol()));
+        cursorCol = offset;
+
+        // The end of a row can be drawn on the next one (see findCursorDisplayRowIndex); step
+        // back a cluster so the caret stays on the row it moved to.
+        if (offset > target.startCol() && findCursorDisplayRowIndex(rows, visibleCols) != toIndex) {
+            cursorCol = GraphemeClusters.clusterStart(targetLine, offset);
+        }
     }
 
     /** Moves the cursor to the start of the current line. */
@@ -411,6 +440,10 @@ public final class TextAreaState {
      * value (and a non-positive width) maps each logical line to exactly one display row,
      * matching the unwrapped {@link Overflow#CLIP} behavior. See {@link #isWrapping}.
      * <p>
+     * When wrapping, a line whose last row fills the whole width (or ends in whitespace that a
+     * word break consumed) is followed by an empty row at the end of the line, so a caret placed
+     * there has a cell to be drawn in.
+     * <p>
      * The result is cached and reused until the text, the width, or the mode changes, so
      * calling this several times per frame is cheap.
      *
@@ -426,12 +459,12 @@ public final class TextAreaState {
         List<DisplayRow> result = new ArrayList<>();
         boolean noWrap = !isWrapping(overflow) || visibleWidth <= 0;
         for (int row = 0; row < lines.size(); row++) {
-            String line = lines.get(row).toString();
+            StringBuilder line = lines.get(row);
             if (noWrap) {
                 result.add(new DisplayRow(row, 0, line.length()));
                 continue;
             }
-            if (line.isEmpty()) {
+            if (line.length() == 0) {
                 result.add(new DisplayRow(row, 0, 0));
                 continue;
             }
@@ -440,6 +473,13 @@ public final class TextAreaState {
                 : wrapLineByCharacter(line, visibleWidth);
             for (int[] segment : segments) {
                 result.add(new DisplayRow(row, segment[0], segment[1]));
+            }
+            // A caret at the end of the line needs a cell to be drawn in. When the last row
+            // already fills the width, or a word break consumed trailing whitespace, the end of
+            // the line gets an empty row of its own.
+            int[] last = segments.get(segments.size() - 1);
+            if (last[1] < line.length() || CharWidth.of(line.substring(last[0], last[1])) >= visibleWidth) {
+                result.add(new DisplayRow(row, line.length(), line.length()));
             }
         }
 
@@ -450,22 +490,24 @@ public final class TextAreaState {
         return cachedRows;
     }
 
-    private static List<int[]> wrapLineByCharacter(String line, int maxWidth) {
+    // Both wrap modes step by grapheme cluster, measured as a whole, so a ZWJ sequence or a
+    // flag is never split across rows and is as wide as CharWidth.of(String) says it is.
+
+    private static List<int[]> wrapLineByCharacter(StringBuilder line, int maxWidth) {
         List<int[]> segments = new ArrayList<>();
         int start = 0;
         int width = 0;
         int i = 0;
         int len = line.length();
         while (i < len) {
-            int codePoint = line.codePointAt(i);
-            int codePointWidth = CharWidth.of(codePoint);
-            int charCount = Character.charCount(codePoint);
+            int clusterEnd = GraphemeClusters.clusterEnd(line, i);
+            int clusterWidth = CharWidth.of(line.substring(i, clusterEnd));
 
-            if (width + codePointWidth > maxWidth) {
+            if (width + clusterWidth > maxWidth) {
                 if (width == 0) {
-                    // Single character wider than maxWidth: give it its own row.
-                    segments.add(new int[] {start, i + charCount});
-                    i += charCount;
+                    // Single cluster wider than maxWidth: give it its own row.
+                    segments.add(new int[] {start, clusterEnd});
+                    i = clusterEnd;
                     start = i;
                     width = 0;
                     continue;
@@ -476,35 +518,39 @@ public final class TextAreaState {
                 continue;
             }
 
-            width += codePointWidth;
-            i += charCount;
+            width += clusterWidth;
+            i = clusterEnd;
         }
-        segments.add(new int[] {start, len});
+        // Nothing is left over when the line ended on a cluster that got a row of its own.
+        if (start < len) {
+            segments.add(new int[] {start, len});
+        }
         return segments;
     }
 
-    private static List<int[]> wrapLineByWord(String line, int maxWidth) {
-        List<Integer> cpOffsets = new ArrayList<>();
-        List<Integer> cpWidths = new ArrayList<>();
+    private static List<int[]> wrapLineByWord(StringBuilder line, int maxWidth) {
+        List<Integer> clusterOffsets = new ArrayList<>();
+        List<Integer> clusterWidths = new ArrayList<>();
         int i = 0;
         while (i < line.length()) {
-            int codePoint = line.codePointAt(i);
-            cpOffsets.add(i);
-            cpWidths.add(CharWidth.of(codePoint));
-            i += Character.charCount(codePoint);
+            int clusterEnd = GraphemeClusters.clusterEnd(line, i);
+            clusterOffsets.add(i);
+            clusterWidths.add(CharWidth.of(line.substring(i, clusterEnd)));
+            i = clusterEnd;
         }
-        cpOffsets.add(line.length());
-        int cpCount = cpWidths.size();
+        clusterOffsets.add(line.length());
+        int clusterCount = clusterWidths.size();
 
         List<int[]> segments = new ArrayList<>();
         int pos = 0;
-        while (pos < cpCount) {
-            int lineEnd = findNextWordBreakByWidth(line, cpOffsets, cpWidths, pos, cpCount, maxWidth);
-            segments.add(new int[] {cpOffsets.get(pos), cpOffsets.get(lineEnd)});
+        while (pos < clusterCount) {
+            int lineEnd = findNextWordBreakByWidth(line, clusterOffsets, clusterWidths, pos, clusterCount, maxWidth);
+            segments.add(new int[] {clusterOffsets.get(pos), clusterOffsets.get(lineEnd)});
 
             // Skip whitespace consumed by the break so the next row never starts with it.
             int nextPos = lineEnd;
-            while (nextPos < cpCount && Character.isWhitespace(line.codePointAt(cpOffsets.get(nextPos)))) {
+            while (nextPos < clusterCount
+                && Character.isWhitespace(line.codePointAt(clusterOffsets.get(nextPos)))) {
                 nextPos++;
             }
             pos = nextPos;
@@ -512,42 +558,43 @@ public final class TextAreaState {
         return segments;
     }
 
-    private static int findNextWordBreakByWidth(String text, List<Integer> cpOffsets, List<Integer> cpWidths,
-                                                  int startPos, int cpCount, int maxWidth) {
+    private static int findNextWordBreakByWidth(StringBuilder text, List<Integer> clusterOffsets,
+                                                  List<Integer> clusterWidths, int startPos, int clusterCount,
+                                                  int maxWidth) {
         int width = 0;
         int maxEnd = startPos;
-        while (maxEnd < cpCount) {
-            int codePointWidth = cpWidths.get(maxEnd);
-            if (width + codePointWidth > maxWidth) {
+        while (maxEnd < clusterCount) {
+            int clusterWidth = clusterWidths.get(maxEnd);
+            if (width + clusterWidth > maxWidth) {
                 break;
             }
-            width += codePointWidth;
+            width += clusterWidth;
             maxEnd++;
         }
 
         if (maxEnd == startPos) {
-            // Single code point wider than maxWidth: force progress.
-            maxEnd = Math.min(startPos + 1, cpCount);
+            // Single cluster wider than maxWidth: force progress.
+            maxEnd = Math.min(startPos + 1, clusterCount);
         }
 
-        if (maxEnd >= cpCount) {
-            return cpCount;
+        if (maxEnd >= clusterCount) {
+            return clusterCount;
         }
 
         // The fit already ends exactly at a word boundary; no need to backtrack.
-        if (Character.isWhitespace(text.codePointAt(cpOffsets.get(maxEnd)))) {
+        if (Character.isWhitespace(text.codePointAt(clusterOffsets.get(maxEnd)))) {
             return maxEnd;
         }
 
         for (int idx = maxEnd - 1; idx > startPos; idx--) {
-            int codePoint = text.codePointAt(cpOffsets.get(idx));
+            int codePoint = text.codePointAt(clusterOffsets.get(idx));
             if (Character.isWhitespace(codePoint)) {
                 return idx;
             }
         }
 
         for (int idx = maxEnd - 1; idx > startPos; idx--) {
-            int codePoint = text.codePointAt(cpOffsets.get(idx));
+            int codePoint = text.codePointAt(clusterOffsets.get(idx));
             if (codePoint == '-' || codePoint == '/' || codePoint == '\\') {
                 return idx + 1;
             }
@@ -589,7 +636,7 @@ public final class TextAreaState {
         }
 
         List<DisplayRow> rows = computeDisplayRows(visibleCols, overflow);
-        int cursorDisplayIndex = findCursorDisplayRowIndex(rows, cursorRow, cursorCol);
+        int cursorDisplayIndex = findCursorDisplayRowIndex(rows, visibleCols);
 
         if (cursorDisplayIndex < scrollRow) {
             scrollRow = cursorDisplayIndex;
@@ -648,23 +695,34 @@ public final class TextAreaState {
     }
 
     /**
-     * Like {@link #findDisplayRowIndex}, but resolves where the cursor is actually *drawn*.
+     * Like {@link #findDisplayRowIndex} for the cursor, but resolves the row it is actually
+     * <em>drawn</em> on.
      * <p>
      * A word-wrap break consumes the whitespace between two rows, so {@code "one two three"} at
      * width 7 yields {@code [0,7)} and {@code [8,13)} — leaving char offset 7 (the consumed
-     * space, reachable with Left/Right) inside no display row. Such a position is drawn at the
-     * start of the following row, where the caret visually lands.
+     * space, reachable with Left/Right) inside no display row. The caret at the break itself
+     * (offset 7) is drawn right after the row's text when the row leaves room for it; here
+     * {@code "one two"} fills the width, so it is drawn at the start of the following row
+     * instead, as is any offset further into the consumed whitespace.
      * <p>
-     * Cursor <em>movement</em> deliberately does not snap: {@code moveCursorUp} clamps to offset
-     * 7 as the end of the first visual row, and {@code moveCursorDown} must then return to the
-     * second one.
+     * Up/Down start from this row too, so the caret always moves from where it is seen.
+     *
+     * @param rows         the display rows, as returned by {@link #computeDisplayRows}
+     * @param visibleWidth the width the rows were wrapped to
+     * @return the index of the display row the cursor is drawn on
      */
-    static int findCursorDisplayRowIndex(List<DisplayRow> rows, int logicalRow, int col) {
-        int index = findDisplayRowIndex(rows, logicalRow, col);
-        if (index + 1 >= rows.size() || col < rows.get(index).endCol()) {
+    int findCursorDisplayRowIndex(List<DisplayRow> rows, int visibleWidth) {
+        int index = findDisplayRowIndex(rows, cursorRow, cursorCol);
+        DisplayRow row = rows.get(index);
+        if (index + 1 >= rows.size() || rows.get(index + 1).logicalRow() != cursorRow
+            || cursorCol < row.endCol()) {
             return index;
         }
-        return rows.get(index + 1).logicalRow() == logicalRow ? index + 1 : index;
+        if (cursorCol == row.endCol()
+            && CharWidth.of(getLine(cursorRow).substring(row.startCol(), row.endCol())) < visibleWidth) {
+            return index;
+        }
+        return index + 1;
     }
 
     private static int findScrollColForCursor(String line, int cursorCol, int visibleCols) {
@@ -741,6 +799,29 @@ public final class TextAreaState {
      */
     public void scrollDown(int amount, int visibleRows) {
         int maxScroll = Math.max(0, lines.size() - visibleRows);
+        scrollRow = Math.min(maxScroll, scrollRow + amount);
+    }
+
+    /**
+     * Scrolls down by the given amount of rows.
+     * <p>
+     * With {@code WRAP_WORD}/{@code WRAP_CHARACTER}, {@code scrollRow} indexes the wrapped
+     * display rows (see {@link #computeDisplayRows}), so scrolling is clamped to their count
+     * rather than to the number of logical lines. Every other {@link Overflow} value (including
+     * {@code null}) is treated as {@link Overflow#CLIP} and behaves exactly like
+     * {@link #scrollDown(int, int)}.
+     *
+     * @param amount      the number of rows to scroll down
+     * @param visibleRows the number of visible rows
+     * @param visibleCols the number of visible columns (used to compute wrapped rows)
+     * @param overflow    the overflow mode
+     */
+    public void scrollDown(int amount, int visibleRows, int visibleCols, Overflow overflow) {
+        if (!isWrapping(overflow)) {
+            scrollDown(amount, visibleRows);
+            return;
+        }
+        int maxScroll = Math.max(0, computeDisplayRows(visibleCols, overflow).size() - visibleRows);
         scrollRow = Math.min(maxScroll, scrollRow + amount);
     }
 

@@ -324,6 +324,20 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
         // Add border height
         int borderHeight = (title != null || borderType != null) ? 2 : 0;
         int height = lineCount + borderHeight;
+
+        // Wrapped lines take more than one row each; ask the widget, which knows the width its
+        // border and line-number gutter leave for text.
+        Overflow effectiveOverflow = resolveOverflow(context);
+        if (availableWidth > 0 && state != null
+                && (effectiveOverflow == Overflow.WRAP_WORD || effectiveOverflow == Overflow.WRAP_CHARACTER)) {
+            boolean isFocused = context != null && elementId != null && context.isFocused(elementId);
+            height = TextArea.builder()
+                    .showLineNumbers(showLineNumbers)
+                    .overflow(effectiveOverflow)
+                    .block(buildBlock(context, isFocused))
+                    .build()
+                    .preferredHeight(availableWidth, state);
+        }
         return Size.of(width, height);
     }
 
@@ -467,27 +481,8 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
             .placeholderStyle(effectivePlaceholderStyle)
             .showLineNumbers(showLineNumbers)
             .lineNumberStyle(effectiveLineNumberStyle)
-            .overflow(effectiveOverflow);
-
-        Color effectiveBorderColor = isFocused && focusedBorderColor != null
-                ? focusedBorderColor
-                : borderColor;
-
-        if (title != null || borderType != null || effectiveBorderColor != null) {
-            Block.Builder blockBuilder = Block.builder()
-                    .borders(Borders.ALL)
-                    .styleResolver(styleResolver(context));
-            if (title != null) {
-                blockBuilder.title(Title.from(title));
-            }
-            if (borderType != null) {
-                blockBuilder.borderType(borderType);
-            }
-            if (effectiveBorderColor != null) {
-                blockBuilder.borderColor(effectiveBorderColor);
-            }
-            builder.block(blockBuilder.build());
-        }
+            .overflow(effectiveOverflow)
+            .block(buildBlock(context, isFocused));
 
         TextArea widget = builder.build();
 
@@ -498,6 +493,30 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
         } else {
             frame.renderStatefulWidget(widget, area, state);
         }
+    }
+
+    /** Returns the border block to draw around the text, or null when there is none. */
+    private Block buildBlock(RenderContext context, boolean isFocused) {
+        Color effectiveBorderColor = isFocused && focusedBorderColor != null
+                ? focusedBorderColor
+                : borderColor;
+
+        if (title == null && borderType == null && effectiveBorderColor == null) {
+            return null;
+        }
+        Block.Builder blockBuilder = Block.builder()
+                .borders(Borders.ALL)
+                .styleResolver(context != null ? styleResolver(context) : null);
+        if (title != null) {
+            blockBuilder.title(Title.from(title));
+        }
+        if (borderType != null) {
+            blockBuilder.borderType(borderType);
+        }
+        if (effectiveBorderColor != null) {
+            blockBuilder.borderColor(effectiveBorderColor);
+        }
+        return blockBuilder.build();
     }
 
     /**

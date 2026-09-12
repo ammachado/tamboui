@@ -29,6 +29,8 @@ import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.tui.event.KeyModifiers;
 import dev.tamboui.widgets.input.TextAreaState;
 
+import static dev.tamboui.toolkit.Toolkit.column;
+import static dev.tamboui.toolkit.Toolkit.text;
 import static dev.tamboui.toolkit.Toolkit.textArea;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -469,6 +471,16 @@ class TextAreaElementTest extends AbstractElementTest {
 
             assertThat(element.getState().cursorCol()).isEqualTo(10);
         }
+
+        @Test
+        @DisplayName("preferredSize wraps when the overflow comes from CSS")
+        void preferredSizeUsesCssResolvedOverflow() {
+            TextAreaElement element = textArea().text("aaaa bbbb cccc");
+
+            // "aaaa bbbb" / "cccc" at width 10; with clip it would be the single logical line.
+            assertThat(element.preferredSize(10, -1, cssContext(Overflow.WRAP_WORD)).height()).isEqualTo(2);
+            assertThat(element.preferredSize(10, -1, cssContext(Overflow.CLIP)).height()).isEqualTo(1);
+        }
     }
 
     @Nested
@@ -713,6 +725,36 @@ class TextAreaElementTest extends AbstractElementTest {
             assertThat(buffer.get(0, 0).symbol()).isEqualTo("o");
             assertThat(buffer.get(0, 1).symbol()).isEqualTo(" "); // no wrap onto row 1
             assertThat(buffer.get(6, 0).symbol()).isEqualTo("o"); // "one two"[6], not an ellipsis
+        }
+
+        @Test
+        @DisplayName("In a column, a wrapped text area gets a row for every wrapped line")
+        void columnSizesWrappedTextArea() {
+            Rect area = new Rect(0, 0, 7, 5);
+            Buffer buffer = Buffer.empty(area);
+            Frame frame = Frame.forTesting(buffer);
+
+            TextAreaState state = new TextAreaState("one two three");
+            state.moveCursorToStart();
+            column(textArea(state).wrapWord(), text("below"))
+                .render(frame, area, RenderContext.empty());
+
+            // Sized by logical lines, the text area would get one row: "three" would be clipped
+            // and "below" would sit on row 1.
+            assertThat(buffer.get(0, 1).symbol()).isEqualTo("t"); // "three"
+            assertThat(buffer.get(0, 2).symbol()).isEqualTo("b"); // "below"
+        }
+
+        @Test
+        @DisplayName("preferredSize counts wrapped rows at the width left by the border and gutter")
+        void preferredSizeCountsWrappedRows() {
+            // 20 wide minus the border (2) and the gutter (4) leaves 14: "one two three" /
+            // "four five", plus the 2 border rows.
+            TextAreaElement element = textArea(new TextAreaState("one two three four five"))
+                .wrapWord().showLineNumbers().rounded();
+
+            assertThat(element.preferredSize(20, -1, RenderContext.empty()).height()).isEqualTo(4);
+            assertThat(element.clip().preferredSize(20, -1, RenderContext.empty()).height()).isEqualTo(3);
         }
     }
 }

@@ -300,8 +300,7 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
         int relativeCol;
         if (TextAreaState.isWrapping(overflow)) {
             List<TextAreaState.DisplayRow> rows = state.computeDisplayRows(textArea.width(), overflow);
-            int cursorDisplayIndex =
-                TextAreaState.findCursorDisplayRowIndex(rows, state.cursorRow(), state.cursorCol());
+            int cursorDisplayIndex = state.findCursorDisplayRowIndex(rows, textArea.width());
             TextAreaState.DisplayRow row = rows.get(cursorDisplayIndex);
 
             relativeRow = cursorDisplayIndex - scrollRow;
@@ -336,6 +335,27 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
             Cell currentCell = buffer.get(cursorX, cursorY);
             buffer.set(cursorX, cursorY, currentCell.patchStyle(cursorStyle));
         }
+    }
+
+    /**
+     * Returns the height, in rows, needed to show all of {@code state}'s text without scrolling
+     * when rendered {@code width} columns wide: one row per display row (see
+     * {@link TextAreaState#computeDisplayRows}), plus the rows taken by the block, if any.
+     * <p>
+     * This uses the same border and gutter math as {@link #render}, so layout code can size a
+     * wrapping text area without re-deriving it.
+     *
+     * @param width the width of the area the widget will be rendered into
+     * @param state the text area state
+     * @return the height that fits the whole text
+     */
+    public int preferredHeight(int width, TextAreaState state) {
+        // Tall enough that the block's insets are the only thing taken off the height.
+        Rect area = new Rect(0, 0, width, Short.MAX_VALUE);
+        Rect inputArea = block != null ? block.inner(area) : area;
+        int textWidth = textAreaRect(inputArea, gutterWidth(state)).width();
+        int rows = state.computeDisplayRows(textWidth, overflow).size();
+        return rows + area.height() - inputArea.height();
     }
 
     /**
