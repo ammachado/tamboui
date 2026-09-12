@@ -11,6 +11,7 @@ import java.util.Map;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Color;
 import dev.tamboui.style.Overflow;
+import dev.tamboui.style.StandardProperties;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.toolkit.element.RenderContext;
@@ -47,6 +48,10 @@ import dev.tamboui.widgets.input.TextAreaState;
  *   <li>{@code TextAreaElement-line-number} - The line number style (default: dim)</li>
  * </ul>
  * <p>
+ * The {@code text-overflow} CSS property selects the overflow mode ({@code clip},
+ * {@code wrap-word}, {@code wrap-character}); a programmatic {@link #overflow(Overflow)}
+ * value takes precedence. Ellipsis values fall back to clip for text areas.</p>
+ * <p>
  * Example CSS:
  * <pre>{@code
  * TextAreaElement-cursor { text-style: reversed; background: cyan; }
@@ -74,6 +79,7 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
     private boolean showLineNumbers = false;
     private Style lineNumberStyle;
     private Overflow overflow;
+    private Overflow renderedOverflow;
     private TextChangeListener changeListener;
 
     /** Creates a new text area element with a default state. */
@@ -362,7 +368,8 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
         }
         // Wrap against the width the widget last rendered with, so Up/Down move by the same
         // visual rows the user is looking at.
-        boolean handled = handleTextAreaKey(state, event, state.lastRenderedWidth(), overflow);
+        boolean handled = handleTextAreaKey(state, event, state.lastRenderedWidth(),
+                renderedOverflow != null ? renderedOverflow : overflow);
         if (handled && changeListener != null) {
             changeListener.onTextChange(state.text());
         }
@@ -420,6 +427,24 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
         }
     }
 
+    /**
+     * Resolves the overflow mode: programmatic value takes precedence, then the
+     * {@code text-overflow} CSS property, then {@link Overflow#CLIP}. The resolved
+     * value is also used by key handling (Up/Down by visual row), which caches the
+     * value seen at the last render since no CSS context is available at event time.
+     */
+    private Overflow resolveOverflow(RenderContext context) {
+        if (overflow != null) {
+            return overflow;
+        }
+        if (context != null) {
+            return context.resolveStyle(this)
+                    .flatMap(resolver -> resolver.get(StandardProperties.TEXT_OVERFLOW))
+                    .orElse(Overflow.CLIP);
+        }
+        return Overflow.CLIP;
+    }
+
     @Override
     protected void renderContent(Frame frame, Rect area, RenderContext context) {
         if (area.isEmpty()) {
@@ -429,6 +454,8 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
         boolean isFocused = elementId != null && context.isFocused(elementId);
 
         // Resolve styles with priority: explicit > CSS > default
+        Overflow effectiveOverflow = resolveOverflow(context);
+        renderedOverflow = effectiveOverflow;
         Style effectiveCursorStyle = resolveEffectiveStyle(context, "cursor", cursorStyle, DEFAULT_CURSOR_STYLE);
         Style effectivePlaceholderStyle = resolveEffectiveStyle(context, "placeholder", placeholderStyle, DEFAULT_PLACEHOLDER_STYLE);
         Style effectiveLineNumberStyle = resolveEffectiveStyle(context, "line-number", lineNumberStyle, DEFAULT_LINE_NUMBER_STYLE);
@@ -440,7 +467,7 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
             .placeholderStyle(effectivePlaceholderStyle)
             .showLineNumbers(showLineNumbers)
             .lineNumberStyle(effectiveLineNumberStyle)
-            .overflow(overflow);
+            .overflow(effectiveOverflow);
 
         Color effectiveBorderColor = isFocused && focusedBorderColor != null
                 ? focusedBorderColor

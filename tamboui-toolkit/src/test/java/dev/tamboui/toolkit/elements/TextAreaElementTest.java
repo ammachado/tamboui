@@ -4,16 +4,20 @@
  */
 package dev.tamboui.toolkit.elements;
 
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.*;
 
 import dev.tamboui.buffer.Buffer;
+import dev.tamboui.css.Styleable;
+import dev.tamboui.css.cascade.CssStyleResolver;
 import dev.tamboui.css.engine.StyleEngine;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Color;
 import dev.tamboui.style.Overflow;
+import dev.tamboui.style.StandardProperties;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.toolkit.AbstractElementTest;
@@ -392,6 +396,78 @@ class TextAreaElementTest extends AbstractElementTest {
             element.handleKeyEvent(new KeyEvent(KeyCode.CHAR, KeyModifiers.NONE, 'H'), false);
 
             assertThat(capturedText.get()).isNull();
+        }
+    }
+
+    @Nested
+    @DisplayName("CSS text-overflow")
+    class CssTextOverflow {
+
+        private RenderContext cssContext(Overflow cssOverflow) {
+            CssStyleResolver cssResolver = CssStyleResolver.builder()
+                    .set(StandardProperties.TEXT_OVERFLOW, cssOverflow)
+                    .build();
+            return new RenderContext() {
+                @Override
+                public boolean isFocused(String elementId) {
+                    return false;
+                }
+
+                @Override
+                public boolean hasFocus() {
+                    return false;
+                }
+
+                @Override
+                public Optional<CssStyleResolver> resolveStyle(Styleable styleable) {
+                    return Optional.of(cssResolver);
+                }
+            };
+        }
+
+        @Test
+        @DisplayName("resolves text-overflow from CSS when no programmatic overflow is set")
+        void resolvesOverflowFromCss() {
+            Rect area = new Rect(0, 0, 10, 3);
+            Buffer buffer = Buffer.empty(area);
+            Frame frame = Frame.forTesting(buffer);
+
+            textArea().text("aaaa bbbb cccc")
+                .render(frame, area, cssContext(Overflow.WRAP_WORD));
+
+            // "cccc" wrapped onto the second visual row
+            assertThat(buffer.get(0, 1).symbol()).isEqualTo("c");
+        }
+
+        @Test
+        @DisplayName("programmatic overflow wins over CSS")
+        void programmaticOverflowWinsOverCss() {
+            Rect area = new Rect(0, 0, 10, 3);
+            Buffer buffer = Buffer.empty(area);
+            Frame frame = Frame.forTesting(buffer);
+
+            textArea().text("aaaa bbbb cccc").clip()
+                .render(frame, area, cssContext(Overflow.WRAP_WORD));
+
+            // Clip stays in effect: nothing wraps onto the second row
+            assertThat(buffer.get(0, 1).symbol()).isEqualTo(" ");
+        }
+
+        @Test
+        @DisplayName("Up/Down honor the CSS-resolved overflow after render")
+        void keyHandlingUsesCssResolvedOverflow() {
+            TextAreaElement element = textArea().text("aaaa bbbb cccc");
+            element.getState().moveCursorToStart();
+            Rect area = new Rect(0, 0, 10, 3);
+            Buffer buffer = Buffer.empty(area);
+            element.render(Frame.forTesting(buffer), area, cssContext(Overflow.WRAP_WORD));
+
+            // Down on the only logical line: with wrapping in effect the cursor
+            // moves to the next visual row (start of "cccc"); with clip it would
+            // not move at all.
+            element.handleKeyEvent(new KeyEvent(KeyCode.DOWN, KeyModifiers.NONE, '\0'), true);
+
+            assertThat(element.getState().cursorCol()).isEqualTo(10);
         }
     }
 
