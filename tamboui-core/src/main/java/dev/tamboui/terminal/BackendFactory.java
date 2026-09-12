@@ -5,6 +5,7 @@
 package dev.tamboui.terminal;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -101,28 +102,33 @@ public final class BackendFactory {
 
     /**
      * Resolves providers from a user specification, returning them in the specified order.
+     * Providers that appear in the specification but were not discovered (e.g. because
+     * the backend jar targets a newer Java version) are silently skipped so that subsequent
+     * entries in the comma-separated list can act as fallbacks.
      *
      * @param providerSpec the provider specification (may be comma-separated)
      * @param allProviders all available providers from ServiceLoader
      * @return list of matching providers in the specified order
-     * @throws BackendException if a backend provider is not found
+     * @throws BackendException if none of the specified providers were found
      */
     private static List<BackendProvider> resolveProviders(String providerSpec, List<BackendProvider> allProviders) {
-        List<BackendProvider> resolved = new java.util.ArrayList<>();
+        List<BackendProvider> resolved = new ArrayList<>();
         for (String spec : providerSpec.split(",")) {
             String trimmedSpec = spec.trim();
             if (trimmedSpec.isEmpty()) {
                 continue;
             }
-            BackendProvider provider = allProviders.stream()
-                    .filter(p -> p.name().equals(trimmedSpec))
+            allProviders.stream()
+                    .filter(p -> p.name().equals(trimmedSpec)
+                            || p.getClass().getName().equals(trimmedSpec))
                     .findFirst()
-                    .orElseThrow(() -> new BackendException(
-                            "No BackendProvider found on classpath for provider name" +
-                                    " '" + trimmedSpec + "'.\n" +
-                                    "Add a backend dependency such as tamboui-jline3-backend or tamboui-panama-backend."
-                    ));
-            resolved.add(provider);
+                    .ifPresent(resolved::add);
+        }
+        if (resolved.isEmpty()) {
+            throw new BackendException(
+                    "No BackendProvider found on classpath for any of the specified providers: '" + providerSpec + "'.\n"
+                            + "Available providers: " + formatAvailableProviders(allProviders) + "\n"
+                            + "Add a backend dependency such as tamboui-jline3-backend or tamboui-panama-backend.");
         }
         return resolved;
     }
