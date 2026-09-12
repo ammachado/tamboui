@@ -64,18 +64,20 @@ public class TextAreaDemo implements Element {
               - Press Enter for new lines
               - Use Home/End for line navigation
 
+            This editor uses the default clip mode, so this long line simply runs off the right edge of the pane instead of wrapping.
+
             Try editing this text!""");
 
-        // Notes area starts empty with placeholder
-        notesState = new TextAreaState();
+        // Notes area demonstrates word wrapping while editing
+        notesState = new TextAreaState(
+            "This pane wraps at word boundaries: type or paste a long sentence and watch it "
+            + "reflow as you edit. Up/Down move by visual row, not logical line.");
 
-        // Read-only area with pre-filled content
+        // Read-only area demonstrates character wrapping
         readOnlyState = new TextAreaState("""
-            This area demonstrates:
-            - showLineNumbers()
-            - Custom lineNumberStyle()
-            - Text that cannot be edited
-            (Focus is disabled)""");
+            This read-only pane wraps by character, breaking anywhere:
+            ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT
+            (also shows line numbers and a disabled cursor)""");
 
         // Initialize counts
         updateCounts();
@@ -125,7 +127,7 @@ public class TextAreaDemo implements Element {
                 // Left column - Main editor
                 column(
                     textArea(mainEditorState)
-                        .title("Main Editor")
+                        .title("Main Editor (clip)")
                         .showLineNumbers()
                         .rounded()
                         .focusedBorderColor(Color.CYAN)
@@ -138,7 +140,8 @@ public class TextAreaDemo implements Element {
                 column(
                     // Notes area with placeholder
                     textArea(notesState)
-                        .title("Notes")
+                        .title("Notes (word wrap)")
+                        .wrapWord()
                         .placeholder("Type your notes here...")
                         .rounded()
                         .focusedBorderColor(Color.CYAN)
@@ -147,7 +150,8 @@ public class TextAreaDemo implements Element {
 
                     // Read-only display area (not focusable)
                     textArea(readOnlyState)
-                        .title("Display (Read-only)")
+                        .title("Display (char wrap, read-only)")
+                        .wrapCharacter()
                         .showLineNumbers()
                         .lineNumberStyle(Style.EMPTY.fg(Color.CYAN))
                         .showCursor(false)
@@ -161,8 +165,9 @@ public class TextAreaDemo implements Element {
                         text(" Home/End - Line start/end").dim(),
                         text(" Enter - New line").dim(),
                         text(" Tab - 4 spaces").dim(),
-                        text(" Backspace/Del - Delete").dim()
-                    )).title("Help").rounded().length(9)
+                        text(" Backspace/Del - Delete").dim(),
+                        text(" Panes: clip / word / char wrap").dim()
+                    )).title("Help").rounded().length(10)
                 ).fill()
             ).fill(),
 
