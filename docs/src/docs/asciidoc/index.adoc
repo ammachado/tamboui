@@ -112,6 +112,7 @@ These work at any API level:
 == Testing & Debugging
 
 * link:pilot-testing.html[Pilot Testing] - Programmatic testing with Pilot
+* link:recording.html[Recording & Playback] - Asciinema session recording and scripted (tape) playback
 * link:tracing.html[Tracing] - Profiling and introspecting with Java Flight Recorder
 
 == Advanced

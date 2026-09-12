@@ -1,0 +1,158 @@
+= Session Recording and Scripted Playback
+:doctype: book
+:icons: font
+:source-highlighter: highlight.js
+:toc: left
+:toclevels: 3
+
+include::_attributes.adoc[]
+
+{project-name} can record any application to an https://docs.asciinema.org/manual/asciicast/v2/[asciinema (.cast)]
+file, and can drive the application from a https://github.com/charmbracelet/vhs[VHS-format] tape script.
+Together they enable fully headless runs: scripted input in, terminal recording out — no TTY,
+no code changes, no extra dependencies. This is useful for demo capture, bug reports,
+CI verification, and letting AI agents interact with and verify TUI applications.
+
+== Recording a session
+
+Set the `tamboui.record` system property to the output path:
+
+[source,shell]
+----
+java -Dtamboui.record=session.cast -jar myapp.jar
+# or with jbang
+jbang -Dtamboui.record=session.cast myapp.java
+----
+
+The application runs normally; every frame is captured and the cast is written when the
+process exits (or when the configured duration is reached). Play it back with
+`asciinema play session.cast`, or render it to a gif/svg with
+https://github.com/asciinema/agg[agg] or vhs.
+
+Recording applies regardless of how the backend was created — including applications that
+construct their own backend and pass it via `TuiConfig.builder().backend(...)`.
+
+=== Recording properties
+
+[cols="2,1,3"]
+|===
+|Property |Default |Description
+
+|`tamboui.record`
+|_unset_
+|Output `.cast` path; setting it enables recording
+
+|`tamboui.record.config`
+|_unset_
+|VHS-format tape file that drives the application (see below); setting it alone also
+enables recording, with the output derived from the tape name
+
+|`tamboui.record.fps`
+|`10`
+|Capture rate in frames per second
+
+|`tamboui.record.duration`
+|`10000`
+|Maximum recording duration in milliseconds — raise this for longer sessions
+
+|`tamboui.record.width` / `tamboui.record.height`
+|`80` / `24`
+|Terminal size the recording reports and captures
+|===
+
+== Driving an application with a tape
+
+Supply a tape file with `tamboui.record.config` and the application is driven by the
+scripted keystrokes instead of live input:
+
+[source,shell]
+----
+# explicit output path
+java -Dtamboui.record=out.cast -Dtamboui.record.config=script.tape -jar myapp.jar
+
+# single property: naming the tape enables recording, and the output
+# is derived from the tape name (script.tape -> script.cast)
+java -Dtamboui.record.config=script.tape -jar myapp.jar
+----
+
+No input file is ever read unless explicitly named — there is no automatic tape lookup —
+and the derived output is written to the directory the tape lives in.
+
+=== Tape format
+
+Tapes use the VHS syntax. A minimal example:
+
+[source]
+----
+# drive the app: wait for startup, navigate, quit
+Sleep 500ms
+Type "hello"
+Down 3
+Enter
+Sleep 1s
+Type "q"
+----
+
+Supported commands:
+
+[cols="1,2"]
+|===
+|Command |Meaning
+
+|`Type "text"`
+|Type a string (supports `\n`, `\t`, `\"`, `\\`, `\xNN` escapes)
+
+|`Enter`, `Tab`, `Space`, `Backspace`, `Delete`, `Escape`
+|Named keys
+
+|`Up`, `Down`, `Left`, `Right`, `Home`, `End`, `PageUp`, `PageDown`
+|Navigation keys
+
+|`Ctrl+<key>`, `Shift+<key>`
+|Modifier combinations (e.g. `Ctrl+C`)
+
+|`Sleep <duration>`
+|Pause, e.g. `Sleep 500ms` or `Sleep 2s`
+
+|`Screenshot`
+|Marks a frame of interest in the recording
+
+|`Source <file>`
+|Include another tape file
+
+|`<Key>@<delay> <count>`
+|Repeat with delay, e.g. `Down@100ms 5` presses Down five times, 100ms apart
+|===
+
+`Set` and `Output` directives are accepted (for compatibility with tapes shared with the
+`vhs` tool) but the recording geometry and output come from the `tamboui.record.*`
+properties.
+
+== Headless verification recipe
+
+Because playback and recording need no TTY, a script or AI agent can run any
+{project-name} application end-to-end and assert on what happened:
+
+[source,shell]
+----
+cat > script.tape <<'EOF'
+Sleep 500ms
+Type "q"
+EOF
+
+jbang -Dtamboui.record.config=script.tape myapp.java
+
+# the cast is plain JSON-lines: assert on rendered content
+grep -q "Expected screen text" script.cast && echo OK
+----
+
+Each cast line is a timestamped output event containing the ANSI frame data, so expected
+labels, table rows, or error messages can be checked with ordinary text tools.
+
+== Relationship to pilot testing
+
+link:pilot-testing.html[Pilot testing] drives widgets programmatically inside a JVM test
+with structured assertions — prefer it for unit/integration tests of your own code.
+Recording works from the *outside* with zero code access: any application, any backend,
+input as keystrokes, output as the actual terminal byte stream. Prefer it for black-box
+verification, demo capture, and reproducing bugs.
