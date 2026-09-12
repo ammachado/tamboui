@@ -68,7 +68,7 @@ public final class BackendFactory {
      * @param  backend the backend to wrap
      * @return         a recording backend when recording is enabled, otherwise {@code backend}
      */
-    public static Backend applyRecording(Backend backend) {
+    public static Backend recordIfEnabled(Backend backend) {
         if (backend instanceof RecordingBackend) {
             return backend;
         }
@@ -141,7 +141,7 @@ public final class BackendFactory {
                 : allProviders;
 
         // Check if recording is enabled and wrap the backend
-        return applyRecording(tryProviders(providers, loadFailures));
+        return recordIfEnabled(tryProviders(providers, loadFailures));
     }
 
     /**

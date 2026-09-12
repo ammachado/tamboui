@@ -193,7 +193,7 @@ public final class TuiRunner implements AutoCloseable {
         // An explicitly configured backend still has to be wrapped for recording; BackendFactory
         // only does that for the backends it creates itself
         Backend backend = config.backend() != null
-                ? BackendFactory.applyRecording(config.backend())
+                ? BackendFactory.recordIfEnabled(config.backend())
                 : BackendFactory.create(config.backendClassLoader());
 
         try {

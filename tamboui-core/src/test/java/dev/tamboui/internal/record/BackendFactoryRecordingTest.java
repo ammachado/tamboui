@@ -18,7 +18,7 @@ import dev.tamboui.terminal.TestBackend;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Tests for {@link BackendFactory#applyRecording(Backend)}.
+ * Tests for {@link BackendFactory#recordIfEnabled(Backend)}.
  * <p>
  * Applications that build their own backend and pass it to {@code TuiConfig.Builder#backend(Backend)} bypass
  * {@code BackendFactory.create()}, which used to be the only place recording was applied. Such applications got a clean
@@ -52,7 +52,7 @@ class BackendFactoryRecordingTest {
     void returnsTheBackendUnchangedWhenRecordingIsDisabled() {
         Backend backend = new TestBackend(80, 24);
 
-        assertThat(BackendFactory.applyRecording(backend)).isSameAs(backend);
+        assertThat(BackendFactory.recordIfEnabled(backend)).isSameAs(backend);
     }
 
     @Test
@@ -61,7 +61,7 @@ class BackendFactoryRecordingTest {
         System.setProperty("tamboui.record.width", "120");
         System.setProperty("tamboui.record.height", "30");
 
-        Backend wrapped = BackendFactory.applyRecording(new TestBackend(80, 24));
+        Backend wrapped = BackendFactory.recordIfEnabled(new TestBackend(80, 24));
 
         // The recording backend reports the configured cast size rather than the delegate's size,
         // which proves the config reached the wrapper instead of merely something being returned.
@@ -71,6 +71,6 @@ class BackendFactoryRecordingTest {
         // A caller may wrap its own backend and then hand it to TuiRunner, which wraps again. Stacking
         // would give the outer wrapper an interaction player of its own, so the tape would be consumed
         // by the wrong layer and the inner recorder would never see any input.
-        assertThat(BackendFactory.applyRecording(wrapped)).isSameAs(wrapped);
+        assertThat(BackendFactory.recordIfEnabled(wrapped)).isSameAs(wrapped);
     }
 }
