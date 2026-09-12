@@ -6,37 +6,65 @@ package dev.tamboui.terminal;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import dev.tamboui.util.IsolatedServiceClassLoader;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 /**
- * Tests for {@link BackendFactory}'s provider resolution logic.
+ * Tests for {@link BackendFactory}'s provider resolution and discovery logic.
  * <p>
- * Uses reflection to test the private {@code resolveProviders} method directly,
- * verifying that a comma-separated provider specification acts as a preference
- * order with fallback rather than a mandatory list.
+ * Provider resolution tests use reflection on the private {@code resolveProviders}
+ * method, verifying that a comma-separated provider specification acts as a
+ * preference order with fallback rather than a mandatory list. Discovery tests use
+ * {@link IsolatedServiceClassLoader} to simulate absent, broken, and hidden providers.
  */
 class BackendFactoryTest {
+
+    private static final String SERVICE = "dev.tamboui.terminal.BackendProvider";
+    private static final String BROKEN_PROVIDER = "dev.tamboui.terminal.ThrowingBackendProvider";
+    private static final String WORKING_PROVIDER = "dev.tamboui.capability.test.TestBackendProvider";
+
+    private String savedBackendProperty;
+
+    @BeforeEach
+    void clearBackendSelection() {
+        // A stray tamboui.backend selection would change which branch create() takes.
+        savedBackendProperty = System.getProperty("tamboui.backend");
+        System.clearProperty("tamboui.backend");
+    }
+
+    @AfterEach
+    void restoreBackendSelection() {
+        // Reset to the original state even when a test set the property itself, so a stray
+        // selection cannot leak into later tests.
+        if (savedBackendProperty != null) {
+            System.setProperty("tamboui.backend", savedBackendProperty);
+        } else {
+            System.clearProperty("tamboui.backend");
+        }
+    }
 
     @Test
     @DisplayName("resolveProviders skips unavailable provider and falls back to next")
     void resolveProviders_skipsUnavailableProvider() throws Exception {
-        Method method = BackendFactory.class.getDeclaredMethod("resolveProviders", String.class, List.class);
-        method.setAccessible(true);
-
         // Only "beta" is available; "alpha" is not (simulating a provider that
         // failed to load, e.g. because it targets a newer Java version)
         List<BackendProvider> available = new ArrayList<>();
         available.add(new StubBackendProvider("beta"));
 
-        @SuppressWarnings("unchecked")
-        List<BackendProvider> resolved = (List<BackendProvider>) method.invoke(null, "alpha,beta", available);
+        List<BackendProvider> resolved = resolveProviders("alpha,beta", available);
 
         assertThat(resolved).hasSize(1);
         assertThat(resolved.get(0).name()).isEqualTo("beta");
@@ -45,15 +73,11 @@ class BackendFactoryTest {
     @Test
     @DisplayName("resolveProviders preserves order when all providers are available")
     void resolveProviders_preservesOrder() throws Exception {
-        Method method = BackendFactory.class.getDeclaredMethod("resolveProviders", String.class, List.class);
-        method.setAccessible(true);
-
         List<BackendProvider> available = new ArrayList<>();
         available.add(new StubBackendProvider("beta"));
         available.add(new StubBackendProvider("alpha"));
 
-        @SuppressWarnings("unchecked")
-        List<BackendProvider> resolved = (List<BackendProvider>) method.invoke(null, "alpha,beta", available);
+        List<BackendProvider> resolved = resolveProviders("alpha,beta", available);
 
         assertThat(resolved).hasSize(2);
         assertThat(resolved.get(0).name()).isEqualTo("alpha");
@@ -63,17 +87,12 @@ class BackendFactoryTest {
     @Test
     @DisplayName("resolveProviders matches a fully qualified provider class name")
     void resolveProviders_matchesFullyQualifiedClassName() throws Exception {
-        Method method = BackendFactory.class.getDeclaredMethod("resolveProviders", String.class, List.class);
-        method.setAccessible(true);
-
         // The class JavaDoc documents selection by FQCN, e.g.
         // tamboui.backend=dev.tamboui.backend.jline.JLineBackendProvider
         List<BackendProvider> available = new ArrayList<>();
         available.add(new StubBackendProvider("alpha"));
 
-        @SuppressWarnings("unchecked")
-        List<BackendProvider> resolved = (List<BackendProvider>) method.invoke(
-                null, StubBackendProvider.class.getName(), available);
+        List<BackendProvider> resolved = resolveProviders(StubBackendProvider.class.getName(), available);
 
         assertThat(resolved).hasSize(1);
         assertThat(resolved.get(0).name()).isEqualTo("alpha");
@@ -81,17 +100,144 @@ class BackendFactoryTest {
 
     @Test
     @DisplayName("resolveProviders throws when no specified provider is available")
-    void resolveProviders_throwsWhenNoneAvailable() throws Exception {
-        Method method = BackendFactory.class.getDeclaredMethod("resolveProviders", String.class, List.class);
-        method.setAccessible(true);
-
+    void resolveProviders_throwsWhenNoneAvailable() {
         List<BackendProvider> available = new ArrayList<>();
         available.add(new StubBackendProvider("gamma"));
 
-        assertThatThrownBy(() -> method.invoke(null, "alpha,beta", available))
+        assertThatThrownBy(() -> resolveProviders("alpha,beta", available))
                 .hasCauseInstanceOf(BackendException.class)
                 .cause()
                 .hasMessageContaining("alpha,beta");
+    }
+
+    @Test
+    void noProviderDeclared_keepsAddDependencyMessage(@TempDir Path tempDir) {
+        ClassLoader empty = new IsolatedServiceClassLoader(getClass().getClassLoader(), SERVICE, tempDir);
+
+        assertThatThrownBy(() -> BackendFactory.create(empty))
+                .isInstanceOf(BackendException.class)
+                .hasMessageContaining("No BackendProvider found on classpath")
+                .hasMessageContaining("Add a backend dependency")
+                .hasMessageNotContaining("could be initialized");
+    }
+
+    @Test
+    void providerDeclaredButFailsToInitialize_reportsRealCause(@TempDir Path tempDir) {
+        ClassLoader broken = new IsolatedServiceClassLoader(
+                getClass().getClassLoader(), SERVICE, tempDir, BROKEN_PROVIDER);
+
+        Throwable thrown = catchThrowable(() -> BackendFactory.create(broken));
+
+        assertThat(thrown)
+                .isInstanceOf(BackendException.class)
+                .hasMessageContaining("could be initialized")
+                .hasMessageContaining("ThrowingBackendProvider")
+                // The misleading "add a dependency" advice must NOT be the message here.
+                .hasMessageNotContaining("Add a backend dependency");
+        assertThat(thrown.getCause()).isNotNull();
+        assertThat(rootCause(thrown)).isInstanceOf(NoClassDefFoundError.class);
+    }
+
+    @Test
+    void userSelectedProviderPresentButBroken_reportsRealCauseNotMissingDependency(@TempDir Path tempDir) {
+        // The user explicitly asked for a backend by name, but the only provider on the classpath
+        // fails to initialize. The selection path must surface the real failure, not advise adding
+        // a dependency that is already present (just broken).
+        System.setProperty("tamboui.backend", "jline");
+        ClassLoader broken = new IsolatedServiceClassLoader(
+                getClass().getClassLoader(), SERVICE, tempDir, BROKEN_PROVIDER);
+
+        Throwable thrown = catchThrowable(() -> BackendFactory.create(broken));
+
+        assertThat(thrown)
+                .isInstanceOf(BackendException.class)
+                .hasMessageContaining("could be initialized")
+                .hasMessageContaining("ThrowingBackendProvider")
+                .hasMessageNotContaining("Add a backend dependency");
+        assertThat(rootCause(thrown)).isInstanceOf(NoClassDefFoundError.class);
+    }
+
+    @Test
+    void requestedProviderBrokenWhileAnotherWorks_reportsRealCause(@TempDir Path tempDir) {
+        // Mixed case: the requested provider is present on the classpath but fails to
+        // initialize, while an unrelated provider is healthy. The error must surface the
+        // real failure instead of advising to add a dependency that is already present.
+        System.setProperty("tamboui.backend", "throwing");
+        ClassLoader mixed = new IsolatedServiceClassLoader(
+                getClass().getClassLoader(), SERVICE, tempDir, BROKEN_PROVIDER, WORKING_PROVIDER);
+
+        Throwable thrown = catchThrowable(() -> BackendFactory.create(mixed));
+
+        assertThat(thrown)
+                .isInstanceOf(BackendException.class)
+                .hasMessageContaining("ThrowingBackendProvider")
+                .hasMessageNotContaining("Add a backend dependency");
+        assertThat(rootCause(thrown)).isInstanceOf(NoClassDefFoundError.class);
+    }
+
+    @Test
+    void unknownProvider_notesUnrelatedLoadFailures(@TempDir Path tempDir) {
+        // The user asked for a provider that simply does not exist, while another provider on
+        // the classpath failed to load. The error should keep the "add a dependency" advice for
+        // the unknown name, but also disclose the dropped provider so it is not silently hidden
+        // (e.g. a typo of a provider that IS present but incompatible with this JVM).
+        System.setProperty("tamboui.backend", "bogus");
+        ClassLoader mixed = new IsolatedServiceClassLoader(
+                getClass().getClassLoader(), SERVICE, tempDir, BROKEN_PROVIDER, WORKING_PROVIDER);
+
+        Throwable thrown = catchThrowable(() -> BackendFactory.create(mixed));
+
+        assertThat(thrown)
+                .isInstanceOf(BackendException.class)
+                .hasMessageContaining("'bogus'")
+                .hasMessageContaining("Available providers: test")
+                .hasMessageContaining("could not be loaded on this JVM")
+                .hasMessageContaining("ThrowingBackendProvider")
+                .hasMessageContaining("Add a backend dependency");
+    }
+
+    @Test
+    void requestedProviderBrokenWithFallback_fallsBackSilently(@TempDir Path tempDir) throws Exception {
+        // Preference order with fallback (#422): the broken first choice is skipped and the
+        // healthy second choice is used, no exception.
+        System.setProperty("tamboui.backend", "throwing,test");
+        ClassLoader mixed = new IsolatedServiceClassLoader(
+                getClass().getClassLoader(), SERVICE, tempDir, BROKEN_PROVIDER, WORKING_PROVIDER);
+
+        try (Backend backend = BackendFactory.create(mixed)) {
+            assertThat(backend).isNotNull();
+        }
+    }
+
+    @Test
+    void blindThreadContextLoader_stillDiscoversProviderViaFallback(@TempDir Path tempDir) throws Exception {
+        ClassLoader blindTccl = new IsolatedServiceClassLoader(getClass().getClassLoader(), SERVICE, tempDir);
+        ClassLoader original = Thread.currentThread().getContextClassLoader();
+        try {
+            Thread.currentThread().setContextClassLoader(blindTccl);
+            try (Backend backend = BackendFactory.create()) {
+                assertThat(backend).isNotNull();
+            }
+        } finally {
+            Thread.currentThread().setContextClassLoader(original);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<BackendProvider> resolveProviders(String spec, List<BackendProvider> available)
+            throws Exception {
+        Method method = BackendFactory.class.getDeclaredMethod(
+                "resolveProviders", String.class, List.class, List.class);
+        method.setAccessible(true);
+        return (List<BackendProvider>) method.invoke(null, spec, available, new ArrayList<Throwable>());
+    }
+
+    private static Throwable rootCause(Throwable t) {
+        Throwable current = t;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     /**
