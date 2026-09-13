@@ -117,3 +117,8 @@ ListElement-item:nth-child(odd) {
     color: #0066cc;
     text-style: bold;
 }
+
+/* Overflow showcase: light theme clips the demo text area at the pane edge */
+#overflow-area {
+    text-overflow: clip;
+}

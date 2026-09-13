@@ -10,6 +10,8 @@ import java.util.Map;
 
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Color;
+import dev.tamboui.style.Overflow;
+import dev.tamboui.style.StandardProperties;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.toolkit.element.RenderContext;
@@ -46,6 +48,10 @@ import dev.tamboui.widgets.input.TextAreaState;
  *   <li>{@code TextAreaElement-line-number} - The line number style (default: dim)</li>
  * </ul>
  * <p>
+ * The {@code text-overflow} CSS property selects the overflow mode ({@code clip},
+ * {@code wrap-word}, {@code wrap-character}); a programmatic {@link #overflow(Overflow)}
+ * value takes precedence. Ellipsis values fall back to clip for text areas.</p>
+ * <p>
  * Example CSS:
  * <pre>{@code
  * TextAreaElement-cursor { text-style: reversed; background: cyan; }
@@ -72,6 +78,8 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
     private boolean showCursor = true;
     private boolean showLineNumbers = false;
     private Style lineNumberStyle;
+    private Overflow overflow;
+    private Overflow renderedOverflow;
     private TextChangeListener changeListener;
 
     /** Creates a new text area element with a default state. */
@@ -198,6 +206,50 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
     }
 
     /**
+     * Sets the overflow (wrap) mode.
+     * <p>
+     * {@link Overflow#CLIP} (the default) preserves horizontal-scroll behavior. {@code
+     * WRAP_WORD}/{@code WRAP_CHARACTER} wrap long lines across multiple screen rows instead,
+     * and Up/Down move the cursor by visual row rather than logical line. The truncating modes
+     * ({@code ELLIPSIS}, {@code ELLIPSIS_START}, {@code ELLIPSIS_MIDDLE}) would hide text the
+     * caret can still reach, so a text area falls back to {@code CLIP} for them.
+     *
+     * @param overflow the overflow mode
+     * @return this builder
+     */
+    public TextAreaElement overflow(Overflow overflow) {
+        this.overflow = overflow;
+        return this;
+    }
+
+    /**
+     * Disables wrapping (horizontal scroll instead). This is the default.
+     *
+     * @return this builder
+     */
+    public TextAreaElement clip() {
+        return overflow(Overflow.CLIP);
+    }
+
+    /**
+     * Wraps long lines at word boundaries.
+     *
+     * @return this builder
+     */
+    public TextAreaElement wrapWord() {
+        return overflow(Overflow.WRAP_WORD);
+    }
+
+    /**
+     * Wraps long lines at character boundaries.
+     *
+     * @return this builder
+     */
+    public TextAreaElement wrapCharacter() {
+        return overflow(Overflow.WRAP_CHARACTER);
+    }
+
+    /**
      * Sets the title for the border.
      *
      * @param title the border title
@@ -272,6 +324,20 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
         // Add border height
         int borderHeight = (title != null || borderType != null) ? 2 : 0;
         int height = lineCount + borderHeight;
+
+        // Wrapped lines take more than one row each; ask the widget, which knows the width its
+        // border and line-number gutter leave for text.
+        Overflow effectiveOverflow = resolveOverflow(context);
+        if (availableWidth > 0 && state != null
+                && (effectiveOverflow == Overflow.WRAP_WORD || effectiveOverflow == Overflow.WRAP_CHARACTER)) {
+            boolean isFocused = context != null && elementId != null && context.isFocused(elementId);
+            height = TextArea.builder()
+                    .showLineNumbers(showLineNumbers)
+                    .overflow(effectiveOverflow)
+                    .block(buildBlock(context, isFocused))
+                    .build()
+                    .preferredHeight(availableWidth, state);
+        }
         return Size.of(width, height);
     }
 
@@ -314,7 +380,10 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
         if (!focused) {
             return EventResult.UNHANDLED;
         }
-        boolean handled = handleTextAreaKey(state, event);
+        // Wrap against the width the widget last rendered with, so Up/Down move by the same
+        // visual rows the user is looking at.
+        boolean handled = handleTextAreaKey(state, event, state.lastRenderedWidth(),
+                renderedOverflow != null ? renderedOverflow : overflow);
         if (handled && changeListener != null) {
             changeListener.onTextChange(state.text());
         }
@@ -324,7 +393,7 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
     /**
      * Handles common key events for text area input.
      */
-    private static boolean handleTextAreaKey(TextAreaState state, KeyEvent event) {
+    private static boolean handleTextAreaKey(TextAreaState state, KeyEvent event, int visibleWidth, Overflow overflow) {
         switch (event.code()) {
             case BACKSPACE:
                 state.deleteBackward();
@@ -339,10 +408,10 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
                 state.moveCursorRight();
                 return true;
             case UP:
-                state.moveCursorUp();
+                state.moveCursorUp(visibleWidth, overflow);
                 return true;
             case DOWN:
-                state.moveCursorDown();
+                state.moveCursorDown(visibleWidth, overflow);
                 return true;
             case HOME:
                 state.moveCursorToLineStart();
@@ -372,6 +441,24 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
         }
     }
 
+    /**
+     * Resolves the overflow mode: programmatic value takes precedence, then the
+     * {@code text-overflow} CSS property, then {@link Overflow#CLIP}. The resolved
+     * value is also used by key handling (Up/Down by visual row), which caches the
+     * value seen at the last render since no CSS context is available at event time.
+     */
+    private Overflow resolveOverflow(RenderContext context) {
+        if (overflow != null) {
+            return overflow;
+        }
+        if (context != null) {
+            return context.resolveStyle(this)
+                    .flatMap(resolver -> resolver.get(StandardProperties.TEXT_OVERFLOW))
+                    .orElse(Overflow.CLIP);
+        }
+        return Overflow.CLIP;
+    }
+
     @Override
     protected void renderContent(Frame frame, Rect area, RenderContext context) {
         if (area.isEmpty()) {
@@ -381,6 +468,8 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
         boolean isFocused = elementId != null && context.isFocused(elementId);
 
         // Resolve styles with priority: explicit > CSS > default
+        Overflow effectiveOverflow = resolveOverflow(context);
+        renderedOverflow = effectiveOverflow;
         Style effectiveCursorStyle = resolveEffectiveStyle(context, "cursor", cursorStyle, DEFAULT_CURSOR_STYLE);
         Style effectivePlaceholderStyle = resolveEffectiveStyle(context, "placeholder", placeholderStyle, DEFAULT_PLACEHOLDER_STYLE);
         Style effectiveLineNumberStyle = resolveEffectiveStyle(context, "line-number", lineNumberStyle, DEFAULT_LINE_NUMBER_STYLE);
@@ -391,35 +480,43 @@ public final class TextAreaElement extends StyledElement<TextAreaElement> {
             .placeholder(placeholder)
             .placeholderStyle(effectivePlaceholderStyle)
             .showLineNumbers(showLineNumbers)
-            .lineNumberStyle(effectiveLineNumberStyle);
-
-        Color effectiveBorderColor = isFocused && focusedBorderColor != null
-                ? focusedBorderColor
-                : borderColor;
-
-        if (title != null || borderType != null || effectiveBorderColor != null) {
-            Block.Builder blockBuilder = Block.builder()
-                    .borders(Borders.ALL)
-                    .styleResolver(styleResolver(context));
-            if (title != null) {
-                blockBuilder.title(Title.from(title));
-            }
-            if (borderType != null) {
-                blockBuilder.borderType(borderType);
-            }
-            if (effectiveBorderColor != null) {
-                blockBuilder.borderColor(effectiveBorderColor);
-            }
-            builder.block(blockBuilder.build());
-        }
+            .lineNumberStyle(effectiveLineNumberStyle)
+            .overflow(effectiveOverflow)
+            .block(buildBlock(context, isFocused));
 
         TextArea widget = builder.build();
 
+        // The widget records the content width it used on the state; see
+        // TextAreaState.lastRenderedWidth(), which key handling reads back.
         if (showCursor && isFocused) {
             widget.renderWithCursor(area, frame.buffer(), state, frame);
         } else {
             frame.renderStatefulWidget(widget, area, state);
         }
+    }
+
+    /** Returns the border block to draw around the text, or null when there is none. */
+    private Block buildBlock(RenderContext context, boolean isFocused) {
+        Color effectiveBorderColor = isFocused && focusedBorderColor != null
+                ? focusedBorderColor
+                : borderColor;
+
+        if (title == null && borderType == null && effectiveBorderColor == null) {
+            return null;
+        }
+        Block.Builder blockBuilder = Block.builder()
+                .borders(Borders.ALL)
+                .styleResolver(context != null ? styleResolver(context) : null);
+        if (title != null) {
+            blockBuilder.title(Title.from(title));
+        }
+        if (borderType != null) {
+            blockBuilder.borderType(borderType);
+        }
+        if (effectiveBorderColor != null) {
+            blockBuilder.borderColor(effectiveBorderColor);
+        }
+        return blockBuilder.build();
     }
 
     /**

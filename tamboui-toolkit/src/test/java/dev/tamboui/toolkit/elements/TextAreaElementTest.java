@@ -4,15 +4,20 @@
  */
 package dev.tamboui.toolkit.elements;
 
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.*;
 
 import dev.tamboui.buffer.Buffer;
+import dev.tamboui.css.Styleable;
+import dev.tamboui.css.cascade.CssStyleResolver;
 import dev.tamboui.css.engine.StyleEngine;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Color;
+import dev.tamboui.style.Overflow;
+import dev.tamboui.style.StandardProperties;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.toolkit.AbstractElementTest;
@@ -24,6 +29,8 @@ import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.tui.event.KeyModifiers;
 import dev.tamboui.widgets.input.TextAreaState;
 
+import static dev.tamboui.toolkit.Toolkit.column;
+import static dev.tamboui.toolkit.Toolkit.text;
 import static dev.tamboui.toolkit.Toolkit.textArea;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -395,6 +402,88 @@ class TextAreaElementTest extends AbstractElementTest {
     }
 
     @Nested
+    @DisplayName("CSS text-overflow")
+    class CssTextOverflow {
+
+        private RenderContext cssContext(Overflow cssOverflow) {
+            CssStyleResolver cssResolver = CssStyleResolver.builder()
+                    .set(StandardProperties.TEXT_OVERFLOW, cssOverflow)
+                    .build();
+            return new RenderContext() {
+                @Override
+                public boolean isFocused(String elementId) {
+                    return false;
+                }
+
+                @Override
+                public boolean hasFocus() {
+                    return false;
+                }
+
+                @Override
+                public Optional<CssStyleResolver> resolveStyle(Styleable styleable) {
+                    return Optional.of(cssResolver);
+                }
+            };
+        }
+
+        @Test
+        @DisplayName("resolves text-overflow from CSS when no programmatic overflow is set")
+        void resolvesOverflowFromCss() {
+            Rect area = new Rect(0, 0, 10, 3);
+            Buffer buffer = Buffer.empty(area);
+            Frame frame = Frame.forTesting(buffer);
+
+            textArea().text("aaaa bbbb cccc")
+                .render(frame, area, cssContext(Overflow.WRAP_WORD));
+
+            // "cccc" wrapped onto the second visual row
+            assertThat(buffer.get(0, 1).symbol()).isEqualTo("c");
+        }
+
+        @Test
+        @DisplayName("programmatic overflow wins over CSS")
+        void programmaticOverflowWinsOverCss() {
+            Rect area = new Rect(0, 0, 10, 3);
+            Buffer buffer = Buffer.empty(area);
+            Frame frame = Frame.forTesting(buffer);
+
+            textArea().text("aaaa bbbb cccc").clip()
+                .render(frame, area, cssContext(Overflow.WRAP_WORD));
+
+            // Clip stays in effect: nothing wraps onto the second row
+            assertThat(buffer.get(0, 1).symbol()).isEqualTo(" ");
+        }
+
+        @Test
+        @DisplayName("Up/Down honor the CSS-resolved overflow after render")
+        void keyHandlingUsesCssResolvedOverflow() {
+            TextAreaElement element = textArea().text("aaaa bbbb cccc");
+            element.getState().moveCursorToStart();
+            Rect area = new Rect(0, 0, 10, 3);
+            Buffer buffer = Buffer.empty(area);
+            element.render(Frame.forTesting(buffer), area, cssContext(Overflow.WRAP_WORD));
+
+            // Down on the only logical line: with wrapping in effect the cursor
+            // moves to the next visual row (start of "cccc"); with clip it would
+            // not move at all.
+            element.handleKeyEvent(new KeyEvent(KeyCode.DOWN, KeyModifiers.NONE, '\0'), true);
+
+            assertThat(element.getState().cursorCol()).isEqualTo(10);
+        }
+
+        @Test
+        @DisplayName("preferredSize wraps when the overflow comes from CSS")
+        void preferredSizeUsesCssResolvedOverflow() {
+            TextAreaElement element = textArea().text("aaaa bbbb cccc");
+
+            // "aaaa bbbb" / "cccc" at width 10; with clip it would be the single logical line.
+            assertThat(element.preferredSize(10, -1, cssContext(Overflow.WRAP_WORD)).height()).isEqualTo(2);
+            assertThat(element.preferredSize(10, -1, cssContext(Overflow.CLIP)).height()).isEqualTo(1);
+        }
+    }
+
+    @Nested
     @DisplayName("Rendering")
     class Rendering {
 
@@ -541,6 +630,131 @@ class TextAreaElementTest extends AbstractElementTest {
             textArea().placeholder("Type here...").rounded().render(frame, area, context);
 
             assertThat(buffer.get(0, 0).style().fg()).contains(Color.YELLOW);
+        }
+    }
+
+    @Nested
+    @DisplayName("Wrapping")
+    class Wrapping {
+
+        @Test
+        @DisplayName("wrapWord() wraps long lines across multiple screen rows")
+        void wrapWordWrapsLongLines() {
+            Rect area = new Rect(0, 0, 7, 3);
+            Buffer buffer = Buffer.empty(area);
+            Frame frame = Frame.forTesting(buffer);
+
+            textArea().text("one two three").wrapWord()
+                .render(frame, area, RenderContext.empty());
+
+            assertThat(buffer.get(0, 0).symbol()).isEqualTo("o");
+            assertThat(buffer.get(4, 0).symbol()).isEqualTo("t"); // "one two"[4] == 't'
+            assertThat(buffer.get(0, 1).symbol()).isEqualTo("t"); // "three" wraps to row 1
+            assertThat(buffer.get(4, 1).symbol()).isEqualTo("e");
+        }
+
+        @Test
+        @DisplayName("Without wrap(), a long line is clipped, not wrapped (unchanged default)")
+        void noWrapClipsByDefault() {
+            Rect area = new Rect(0, 0, 7, 3);
+            Buffer buffer = Buffer.empty(area);
+            Frame frame = Frame.forTesting(buffer);
+
+            TextAreaState state = new TextAreaState("one two three");
+            state.moveCursorToStart(); // avoid CLIP auto-scrolling to the end-of-text cursor
+
+            textArea(state).render(frame, area, RenderContext.empty());
+
+            assertThat(buffer.get(0, 0).symbol()).isEqualTo("o");
+            assertThat(buffer.get(0, 1).symbol()).isEqualTo(" "); // row 1 stays empty, no wrap
+        }
+
+        @Test
+        @DisplayName("Up/Down move the cursor by visual row once a wrapped layout has been rendered")
+        void arrowKeysMoveByVisualRowWhenWrapped() {
+            Rect area = new Rect(0, 0, 7, 3);
+            Buffer buffer = Buffer.empty(area);
+            Frame frame = Frame.forTesting(buffer);
+
+            TextAreaState state = new TextAreaState("one two three");
+            TextAreaElement element = textArea(state).wrapWord();
+            element.render(frame, area, RenderContext.empty()); // establishes the 7-wide layout
+            state.moveCursorToStart(); // back to row 0, col 0 (first visual row)
+
+            element.handleKeyEvent(new KeyEvent(KeyCode.DOWN, KeyModifiers.NONE, '\0'), true);
+
+            assertThat(state.cursorRow()).isEqualTo(0); // still logical line 0
+            assertThat(state.cursorCol()).isEqualTo(8); // start of "three" segment, not end of doc
+        }
+
+        @Test
+        @DisplayName("Up/Down wrap against the same width the border and gutter left for text")
+        void arrowKeysUseTheRenderedContentWidth() {
+            // 20 wide minus the border (2) and the line-number gutter (4) leaves 14 for text,
+            // so "one two three four five" wraps into "one two three" / "four five".
+            Rect area = new Rect(0, 0, 20, 5);
+            Buffer buffer = Buffer.empty(area);
+            Frame frame = Frame.forTesting(buffer);
+
+            TextAreaState state = new TextAreaState("one two three four five");
+            TextAreaElement element = textArea(state).wrapWord().showLineNumbers().rounded();
+            element.render(frame, area, RenderContext.empty());
+            state.moveCursorToStart();
+
+            assertThat(state.lastRenderedWidth()).isEqualTo(14);
+
+            element.handleKeyEvent(new KeyEvent(KeyCode.DOWN, KeyModifiers.NONE, '\0'), true);
+
+            // Start of "four five": wrapping at the full area width would not have broken at all.
+            assertThat(state.cursorCol()).isEqualTo(14);
+        }
+
+        @Test
+        @DisplayName("A truncating overflow mode falls back to clipping instead of wrapping")
+        void truncatingOverflowFallsBackToClip() {
+            Rect area = new Rect(0, 0, 7, 3);
+            Buffer buffer = Buffer.empty(area);
+            Frame frame = Frame.forTesting(buffer);
+
+            TextAreaState state = new TextAreaState("one two three");
+            state.moveCursorToStart(); // avoid CLIP auto-scrolling to the end-of-text cursor
+
+            textArea(state).overflow(Overflow.ELLIPSIS)
+                .render(frame, area, RenderContext.empty());
+
+            assertThat(buffer.get(0, 0).symbol()).isEqualTo("o");
+            assertThat(buffer.get(0, 1).symbol()).isEqualTo(" "); // no wrap onto row 1
+            assertThat(buffer.get(6, 0).symbol()).isEqualTo("o"); // "one two"[6], not an ellipsis
+        }
+
+        @Test
+        @DisplayName("In a column, a wrapped text area gets a row for every wrapped line")
+        void columnSizesWrappedTextArea() {
+            Rect area = new Rect(0, 0, 7, 5);
+            Buffer buffer = Buffer.empty(area);
+            Frame frame = Frame.forTesting(buffer);
+
+            TextAreaState state = new TextAreaState("one two three");
+            state.moveCursorToStart();
+            column(textArea(state).wrapWord(), text("below"))
+                .render(frame, area, RenderContext.empty());
+
+            // Sized by logical lines, the text area would get one row: "three" would be clipped
+            // and "below" would sit on row 1.
+            assertThat(buffer.get(0, 1).symbol()).isEqualTo("t"); // "three"
+            assertThat(buffer.get(0, 2).symbol()).isEqualTo("b"); // "below"
+        }
+
+        @Test
+        @DisplayName("preferredSize counts wrapped rows at the width left by the border and gutter")
+        void preferredSizeCountsWrappedRows() {
+            // 20 wide minus the border (2) and the gutter (4) leaves 14: "one two three" /
+            // "four five", plus the 2 border rows.
+            TextAreaElement element = textArea(new TextAreaState("one two three four five"))
+                .wrapWord().showLineNumbers().rounded();
+
+            assertThat(element.preferredSize(20, -1, RenderContext.empty()).height()).isEqualTo(4);
+            assertThat(element.clip().preferredSize(20, -1, RenderContext.empty()).height()).isEqualTo(3);
         }
     }
 }

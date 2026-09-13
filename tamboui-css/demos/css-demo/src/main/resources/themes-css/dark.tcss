@@ -116,3 +116,8 @@ ListElement-item:nth-child(odd) {
     color: cyan;
     text-style: bold;
 }
+
+/* Overflow showcase: dark theme wraps the demo text area at word boundaries */
+#overflow-area {
+    text-overflow: wrap-word;
+}

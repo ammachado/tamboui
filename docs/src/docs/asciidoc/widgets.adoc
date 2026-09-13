@@ -160,11 +160,12 @@ Displays multi-line text with wrapping and alignment:
 include::{snippets-dir}/dev/tamboui/docs/snippets/WidgetsSnippets.java[tags=paragraph]
 ----
 
-Wrap modes:
+Wrap modes, set with `.overflow(...)` (CSS property: `text-overflow`):
 
-* `Wrap.NONE` - No wrapping, text is clipped
-* `Wrap.CHARACTER` - Wrap at any character
-* `Wrap.WORD` - Wrap at word boundaries
+* `Overflow.CLIP` - No wrapping, text is clipped
+* `Overflow.WRAP_CHARACTER` - Wrap at any character
+* `Overflow.WRAP_WORD` - Wrap at word boundaries
+* `Overflow.ELLIPSIS` / `ELLIPSIS_START` / `ELLIPSIS_MIDDLE` - Truncate with `...` at the end, start, or middle
 
 == Selection Widgets
 
@@ -549,13 +550,35 @@ State methods:
 * `state.moveCursorToLineStart()` / `moveCursorToLineEnd()` - Jump to line boundaries
 * `state.moveCursorToStart()` / `moveCursorToEnd()` - Jump to document boundaries
 * `state.scrollUp(amount)` / `state.scrollDown(amount, visibleRows)` - Manual scrolling
+  (`scrollDown(amount, visibleRows, visibleCols, overflow)` counts wrapped rows when wrapping)
 * `state.clear()` - Clear all content
+
+Wrap modes:
+
+By default a long line is clipped and the view scrolls horizontally. Set `.overflow(...)` on
+`TextArea.Builder` (or `.overflow(...)` / `.wrapWord()` / `.wrapCharacter()` / `.clip()` on
+`TextAreaElement`) to wrap it across multiple screen rows instead:
+
+* `Overflow.CLIP` - No wrapping, horizontal scrolling (default)
+* `Overflow.WRAP_CHARACTER` - Wrap at any character
+* `Overflow.WRAP_WORD` - Wrap at word boundaries
+
+While wrapping, `Up`/`Down` move the cursor by visual row rather than by logical line, keeping
+its screen column, and the line-number gutter shows a number only on the first row of each
+logical line. A line whose last row fills the whole width is followed by an empty row, so the
+cursor at the end of that line stays visible. In the Toolkit DSL, a wrapping `TextAreaElement`
+asks its container for enough rows to show every wrapped line.
+
+NOTE: Unlike `Paragraph`, a text area does not support the truncating modes (`Overflow.ELLIPSIS`,
+`ELLIPSIS_START`, `ELLIPSIS_MIDDLE`) - the cursor can move into text they would hide. They fall
+back to `Overflow.CLIP`.
 
 CSS properties:
 
 * `cursor-color` - Cursor highlight color
 * `placeholder-color` - Placeholder text color
 * `line-number-color` - Line number gutter color
+* `text-overflow` - Wrap mode (`clip`, `wrap-word`, `wrap-character`)
 
 [[checkbox]]
 === Checkbox
