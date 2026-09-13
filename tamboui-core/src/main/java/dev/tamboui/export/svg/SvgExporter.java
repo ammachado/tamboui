@@ -159,7 +159,7 @@ public final class SvgExporter {
                         "class", className,
                         "x", format(runStart * charWidth),
                         "y", format(y * lineHeight + charHeight),
-                        "textLength", format(charWidth * text.length()),
+                        "textLength", format(charWidth * runLen),
                         "clip-path", "url(#" + uniqueId + "-line-" + y + ")"
                     ));
                 }
