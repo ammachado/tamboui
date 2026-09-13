@@ -16,6 +16,9 @@ import dev.tamboui.terminal.Frame;
 import dev.tamboui.toolkit.element.RenderContext;
 import dev.tamboui.toolkit.element.Size;
 import dev.tamboui.toolkit.element.StyledElement;
+import dev.tamboui.widgets.syntax.RegexSyntaxHighlighter;
+import dev.tamboui.widgets.syntax.SyntaxHighlighter;
+import dev.tamboui.widgets.syntax.SyntaxTheme;
 
 /**
  * Toolkit DSL element rendering CommonMark + GFM markdown via
@@ -42,6 +45,8 @@ public final class MarkdownElement extends StyledElement<MarkdownElement> {
 
     private String source;
     private MarkdownStyles styles;
+    private SyntaxHighlighter syntaxHighlighter = RegexSyntaxHighlighter.defaults();
+    private SyntaxTheme syntaxTheme;
     private Overflow overflow;
     private int scroll;
 
@@ -94,6 +99,31 @@ public final class MarkdownElement extends StyledElement<MarkdownElement> {
     }
 
     /**
+     * Sets the {@link SyntaxHighlighter} used to tokenize fenced code blocks.
+     * Defaults to {@code RegexSyntaxHighlighter.defaults()}; use
+     * {@link SyntaxHighlighter#none()} to disable highlighting.
+     *
+     * @param syntaxHighlighter the highlighter, must not be null
+     * @return this element for chaining
+     */
+    public MarkdownElement syntaxHighlighter(SyntaxHighlighter syntaxHighlighter) {
+        this.syntaxHighlighter = Objects.requireNonNull(syntaxHighlighter, "syntaxHighlighter");
+        return this;
+    }
+
+    /**
+     * Sets the {@link SyntaxTheme} mapping token types to styles while
+     * highlighting fenced code blocks. Defaults to {@link SyntaxTheme#DEFAULTS}.
+     *
+     * @param syntaxTheme the syntax theme, must not be null
+     * @return this element for chaining
+     */
+    public MarkdownElement syntaxTheme(SyntaxTheme syntaxTheme) {
+        this.syntaxTheme = Objects.requireNonNull(syntaxTheme, "syntaxTheme");
+        return this;
+    }
+
+    /**
      * Sets the overflow mode for prose lines wider than the content area.
      *
      * @param overflow the overflow mode
@@ -133,7 +163,7 @@ public final class MarkdownElement extends StyledElement<MarkdownElement> {
         StylePropertyResolver resolver = context != null
             ? context.resolveStyle(this).map(r -> (StylePropertyResolver) r).orElse(StylePropertyResolver.empty())
             : StylePropertyResolver.empty();
-        MarkdownView view = buildView(effectiveStyle, resolver);
+        MarkdownView view = buildView(effectiveStyle, resolver, context);
         return Size.of(availableWidth, view.computeHeight(availableWidth));
     }
 
@@ -143,14 +173,17 @@ public final class MarkdownElement extends StyledElement<MarkdownElement> {
         StylePropertyResolver resolver = context.resolveStyle(this)
             .map(r -> (StylePropertyResolver) r)
             .orElse(StylePropertyResolver.empty());
-        frame.renderWidget(buildView(effectiveStyle, resolver), area);
+        frame.renderWidget(buildView(effectiveStyle, resolver, context), area);
     }
 
-    private MarkdownView buildView(Style effectiveStyle, StylePropertyResolver resolver) {
+    private MarkdownView buildView(Style effectiveStyle, StylePropertyResolver resolver, RenderContext context) {
+        SyntaxTheme effectiveSyntaxTheme = syntaxTheme != null ? syntaxTheme : resolveSyntaxTheme(context);
         MarkdownView.Builder b = MarkdownView.builder()
             .source(source)
             .style(effectiveStyle)
             .styleResolver(resolver)
+            .syntaxHighlighter(syntaxHighlighter)
+            .syntaxTheme(effectiveSyntaxTheme)
             .scroll(scroll);
         if (styles != null) {
             b.styles(styles);

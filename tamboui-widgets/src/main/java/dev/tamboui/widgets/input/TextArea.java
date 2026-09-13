@@ -19,8 +19,13 @@ import dev.tamboui.style.Style;
 import dev.tamboui.style.StylePropertyResolver;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.CharWidth;
+import dev.tamboui.text.Line;
+import dev.tamboui.text.Span;
 import dev.tamboui.widget.StatefulWidget;
 import dev.tamboui.widgets.block.Block;
+import dev.tamboui.widgets.syntax.RegexSyntaxHighlighter;
+import dev.tamboui.widgets.syntax.SyntaxHighlighter;
+import dev.tamboui.widgets.syntax.SyntaxTheme;
 
 /**
  * A text area widget for multi-line text entry.
@@ -63,6 +68,9 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
     private final boolean showLineNumbers;
     private final Style lineNumberStyle;
     private final Overflow overflow;
+    private final SyntaxHighlighter highlighter;
+    private final String highlightLanguage;
+    private final SyntaxTheme highlightTheme;
 
     private TextArea(Builder builder) {
         this.block = builder.block;
@@ -103,6 +111,9 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
             baseLineNumberStyle = baseLineNumberStyle.fg(resolvedLineNumberColor);
         }
         this.lineNumberStyle = baseLineNumberStyle;
+        this.highlighter = builder.highlighter;
+        this.highlightLanguage = builder.highlightLanguage;
+        this.highlightTheme = builder.highlightTheme;
     }
 
     /**
@@ -188,6 +199,15 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
         int scrollRow = state.scrollRow();
         int scrollCol = state.scrollCol();
 
+        // With a highlighter configured, style the full text once per render; the
+        // highlighter emits one Line per logical line. Rows are mapped by index
+        // with a per-line plain fallback, since conventions for a trailing
+        // newline differ (the state counts a final empty line, highlighters
+        // typically trim it).
+        List<Line> styledLines = highlighter != null
+            ? highlighter.highlight(state.text(), highlightLanguage, style, highlightTheme)
+            : null;
+
         for (int y = 0; y < visibleHeight; y++) {
             int lineIndex = scrollRow + y;
             int screenY = textArea.top() + y;
@@ -198,19 +218,28 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
             if (hasLine) {
                 String line = state.getLine(lineIndex);
 
-                // Calculate visible portion of line
-                // scrollCol is a character offset; convert to proper substring then truncate by width
-                String visibleText = "";
-                if (scrollCol < line.length()) {
-                    String lineFromScroll = line.substring(scrollCol);
-                    visibleText = CharWidth.substringByWidth(lineFromScroll, visibleWidth);
+                Line styledLine = styledLines != null && lineIndex < styledLines.size()
+                    ? styledLines.get(lineIndex)
+                    : null;
+
+                int textEnd;
+                if (styledLine != null) {
+                    textEnd = renderStyledLine(buffer, textArea.left(), screenY,
+                        styledLine, scrollCol, visibleWidth);
+                } else {
+                    // Calculate visible portion of line
+                    // scrollCol is a character offset; convert to proper substring then truncate by width
+                    String visibleText = "";
+                    if (scrollCol < line.length()) {
+                        String lineFromScroll = line.substring(scrollCol);
+                        visibleText = CharWidth.substringByWidth(lineFromScroll, visibleWidth);
+                    }
+
+                    buffer.setString(textArea.left(), screenY, visibleText, style);
+                    textEnd = textArea.left() + CharWidth.of(visibleText);
                 }
 
-                buffer.setString(textArea.left(), screenY, visibleText, style);
-
                 // Fill remaining space
-                int visibleTextWidth = CharWidth.of(visibleText);
-                int textEnd = textArea.left() + visibleTextWidth;
                 for (int x = textEnd; x < textArea.right(); x++) {
                     buffer.set(x, screenY, new Cell(" ", style));
                 }
@@ -255,6 +284,38 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
                 }
             }
         }
+    }
+
+    /**
+     * Renders a styled line from character offset {@code fromChar}, truncated to
+     * {@code maxWidth} display columns, walking spans so token styles survive
+     * horizontal scrolling.
+     *
+     * @return the buffer column after the last rendered character
+     */
+    private static int renderStyledLine(Buffer buffer, int x, int y, Line line, int fromChar, int maxWidth) {
+        int col = x;
+        int skip = fromChar;
+        int remaining = maxWidth;
+        for (Span span : line.spans()) {
+            String content = span.content();
+            if (skip >= content.length()) {
+                skip -= content.length();
+                continue;
+            }
+            String piece = skip > 0 ? content.substring(skip) : content;
+            skip = 0;
+            String fit = CharWidth.substringByWidth(piece, remaining);
+            if (fit.isEmpty()) {
+                break;
+            }
+            col = buffer.setString(col, y, fit, span.style());
+            remaining -= CharWidth.of(fit);
+            if (remaining <= 0) {
+                break;
+            }
+        }
+        return col;
     }
 
     private void renderGutterCell(Rect inputArea, int gutterWidth, int screenY, int lineNumber, Buffer buffer) {
@@ -370,6 +431,9 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
         private boolean showLineNumbers = false;
         private Style lineNumberStyle = Style.EMPTY.dim();
         private Overflow overflow;
+        private SyntaxHighlighter highlighter;
+        private String highlightLanguage;
+        private SyntaxTheme highlightTheme = SyntaxTheme.DEFAULTS;
         private StylePropertyResolver styleResolver = StylePropertyResolver.empty();
 
         // Style-aware properties (resolved via styleResolver in build())
@@ -472,6 +536,59 @@ public final class TextArea implements StatefulWidget<TextAreaState> {
          */
         public Builder overflow(Overflow overflow) {
             this.overflow = overflow;
+            return this;
+        }
+
+        /**
+         * Enables syntax highlighting with the built-in highlighter and default theme.
+         *
+         * @param language the language identifier or alias (e.g. {@code java}, {@code css})
+         * @return this builder
+         */
+        public Builder highlighter(String language) {
+            return highlighter(RegexSyntaxHighlighter.defaults(), language, SyntaxTheme.DEFAULTS);
+        }
+
+        /**
+         * Enables syntax highlighting with the built-in highlighter and a custom theme.
+         *
+         * @param language the language identifier or alias
+         * @param theme the token palette
+         * @return this builder
+         */
+        public Builder highlighter(String language, SyntaxTheme theme) {
+            return highlighter(RegexSyntaxHighlighter.defaults(), language, theme);
+        }
+
+        /**
+         * Enables syntax highlighting of the text area content using the
+         * {@link SyntaxTheme#DEFAULTS default theme}.
+         * <p>
+         * The full text is highlighted on each render, so this is intended for
+         * code-editor-sized content; combine with the highlighter's max line
+         * length guard for untrusted input. Highlighting currently applies in
+         * {@link Overflow#CLIP} mode only; wrapped modes render unstyled.
+         *
+         * @param highlighter the highlighter (e.g. {@code RegexSyntaxHighlighter.defaults()})
+         * @param language the language identifier or alias (e.g. {@code java}, {@code css})
+         * @return this builder
+         */
+        public Builder highlighter(SyntaxHighlighter highlighter, String language) {
+            return highlighter(highlighter, language, SyntaxTheme.DEFAULTS);
+        }
+
+        /**
+         * Enables syntax highlighting of the text area content with a custom theme.
+         *
+         * @param highlighter the highlighter
+         * @param language the language identifier or alias
+         * @param theme the token palette
+         * @return this builder
+         */
+        public Builder highlighter(SyntaxHighlighter highlighter, String language, SyntaxTheme theme) {
+            this.highlighter = highlighter;
+            this.highlightLanguage = language;
+            this.highlightTheme = theme;
             return this;
         }
 

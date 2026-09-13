@@ -7,6 +7,7 @@ package dev.tamboui.toolkit.element;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -36,6 +37,8 @@ import dev.tamboui.tui.error.TuiException;
 import dev.tamboui.tui.event.Event;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.tui.event.MouseEvent;
+import dev.tamboui.widgets.syntax.SyntaxTheme;
+import dev.tamboui.widgets.syntax.TokenType;
 
 /**
  * Abstract base for elements that support styling and event handling.
@@ -505,6 +508,70 @@ public abstract class StyledElement<T extends StyledElement<T>> implements Eleme
 
         // Priority 3: Default style
         return defaultStyle;
+    }
+
+    /**
+     * Resolves a syntax theme following the priority: element-specific CSS,
+     * generic syntax-token CSS, then the default syntax theme.
+     * <p>
+     * Element-specific selectors use child names such as
+     * {@code MarkdownElement-syntax-keyword}. Generic selectors such as
+     * {@code syntax-keyword} apply to every syntax-aware element.
+     *
+     * @param context the render context for CSS resolution, or null when unavailable
+     * @return the resolved syntax theme
+     */
+    protected SyntaxTheme resolveSyntaxTheme(RenderContext context) {
+        if (context == null) {
+            return SyntaxTheme.DEFAULTS;
+        }
+        SyntaxTheme.Builder theme = SyntaxTheme.builder();
+        for (TokenType type : TokenType.values()) {
+            String name = "syntax-" + type.name().toLowerCase(Locale.ROOT);
+            Style css = resolveEffectiveStyle(context, name, null, null);
+            if (css == null) {
+                css = resolveGenericSyntaxStyle(context, name);
+            }
+            if (css != null) {
+                theme.token(type, css);
+            }
+        }
+        return theme.build();
+    }
+
+    private static Style resolveGenericSyntaxStyle(RenderContext context, String name) {
+        return context.resolveStyle(new SyntaxTokenStyleable(name))
+            .filter(CssStyleResolver::hasProperties)
+            .map(CssStyleResolver::toStyle)
+            .orElse(null);
+    }
+
+    private static final class SyntaxTokenStyleable implements Styleable {
+        private final String type;
+
+        SyntaxTokenStyleable(String type) {
+            this.type = type;
+        }
+
+        @Override
+        public String styleType() {
+            return type;
+        }
+
+        @Override
+        public Optional<String> cssId() {
+            return Optional.empty();
+        }
+
+        @Override
+        public Set<String> cssClasses() {
+            return Collections.emptySet();
+        }
+
+        @Override
+        public Optional<Styleable> cssParent() {
+            return Optional.empty();
+        }
     }
 
     /**

@@ -34,6 +34,7 @@ import dev.tamboui.tui.bindings.BindingSets;
 import dev.tamboui.tui.bindings.KeyTrigger;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.input.TextAreaState;
+import dev.tamboui.widgets.syntax.RegexSyntaxHighlighter;
 
 import static dev.tamboui.export.ExportRequest.export;
 import static dev.tamboui.toolkit.Toolkit.*;
@@ -57,6 +58,24 @@ public class CustomComponentDemo implements Element {
 
     private static final String DEFAULT_CSS = """
         /* Edit this CSS to style the cards! */
+
+        /* ══════════════════════════════════════════
+           Syntax highlighting of THIS editor -
+           edit these and watch the colors change
+           ══════════════════════════════════════════ */
+
+        syntax-comment {
+            color: #7f848e;
+            text-style: italic;
+        }
+
+        syntax-attribute {
+            color: #61afef;
+        }
+
+        syntax-number {
+            color: #e5c07b;
+        }
 
         /* ══════════════════════════════════════════
            ProgressCard Styles
@@ -300,6 +319,7 @@ public class CustomComponentDemo implements Element {
                 column(
                     textArea(cssEditorState)
                         .title("CSS Editor - Edit to see live changes")
+                        .highlighter(RegexSyntaxHighlighter.defaults(), "css")
                         .showLineNumbers()
                         .id("css-editor"),
 

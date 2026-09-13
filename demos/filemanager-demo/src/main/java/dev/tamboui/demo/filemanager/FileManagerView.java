@@ -28,6 +28,9 @@ import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
+import dev.tamboui.widgets.syntax.RegexSyntaxHighlighter;
+import dev.tamboui.widgets.syntax.SyntaxHighlighter;
+import dev.tamboui.widgets.syntax.SyntaxTheme;
 
 import static dev.tamboui.toolkit.Toolkit.*;
 
@@ -410,6 +413,12 @@ public class FileManagerView implements Element {
         currentDialog.render(frame, area, context);
     }
 
+    private static String fileExtension(Path path) {
+        String name = path.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        return dot >= 0 && dot < name.length() - 1 ? name.substring(dot + 1).toLowerCase() : "";
+    }
+
     private void renderImage(Frame frame, Rect area, Path imagePath) {
         try {
             ImageData imageData = ImageData.fromPath(imagePath);
@@ -431,14 +440,22 @@ public class FileManagerView implements Element {
         }
     }
 
+    /** Shared highlighter with the built-in grammars; unknown languages render plain. */
+    private static final SyntaxHighlighter HIGHLIGHTER = RegexSyntaxHighlighter.defaults();
+
     private void renderTextFile(Frame frame, Rect area, Path textPath) {
         try {
             byte[] bytes = Files.readAllBytes(textPath);
             String content = new String(bytes, StandardCharsets.UTF_8);
             int scrollPos = manager.textScrollPosition();
-            
+
+            // Syntax-highlight by file extension; unknown extensions fall back to plain
+            String language = fileExtension(textPath);
+            Text text = Text.from(HIGHLIGHTER.highlight(
+                    content, language, dev.tamboui.style.Style.EMPTY.fg(Color.WHITE), SyntaxTheme.DEFAULTS));
+
             Paragraph paragraph = Paragraph.builder()
-                    .text(Text.from(content))
+                    .text(text)
                     .overflow(Overflow.WRAP_WORD)
                     .scroll(scrollPos)
                     .style(dev.tamboui.style.Style.EMPTY.fg(Color.WHITE))

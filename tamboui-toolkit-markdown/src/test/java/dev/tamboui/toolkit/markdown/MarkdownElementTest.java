@@ -8,6 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import dev.tamboui.buffer.Buffer;
+import dev.tamboui.css.engine.StyleEngine;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.markdown.MarkdownStyles;
 import dev.tamboui.style.Color;
@@ -16,8 +17,11 @@ import dev.tamboui.style.Overflow;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.toolkit.AbstractElementTest;
+import dev.tamboui.toolkit.element.DefaultRenderContext;
 import dev.tamboui.toolkit.element.RenderContext;
 import dev.tamboui.toolkit.element.Size;
+import dev.tamboui.widgets.syntax.SyntaxTheme;
+import dev.tamboui.widgets.syntax.TokenType;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -67,6 +71,44 @@ class MarkdownElementTest extends AbstractElementTest {
         assertThat(buffer.get(0, 0).style().fg()).isPresent()
             .get()
             .isEqualTo(Color.MAGENTA);
+    }
+
+    @Test
+    @DisplayName("syntax token colors resolve from CSS child selectors")
+    void syntaxTokenColorsResolveFromCss() {
+        StyleEngine styleEngine = StyleEngine.create();
+        styleEngine.addStylesheet("test", "MarkdownElement-syntax-keyword { color: red; }");
+        styleEngine.setActiveStylesheet("test");
+        DefaultRenderContext context = DefaultRenderContext.createEmpty();
+        context.setStyleEngine(styleEngine);
+        Rect area = new Rect(0, 0, 30, 3);
+        Buffer buffer = Buffer.empty(area);
+
+        MarkdownElement.of("```java\npublic class Demo {}\n```")
+            .render(Frame.forTesting(buffer), area, context);
+
+        assertThat(buffer.get(1, 1).style().fg()).contains(Color.RED);
+    }
+
+    @Test
+    @DisplayName("an explicit syntax theme overrides CSS")
+    void explicitSyntaxThemeOverridesCss() {
+        StyleEngine styleEngine = StyleEngine.create();
+        styleEngine.addStylesheet("test", "MarkdownElement-syntax-keyword { color: blue; }");
+        styleEngine.setActiveStylesheet("test");
+        DefaultRenderContext context = DefaultRenderContext.createEmpty();
+        context.setStyleEngine(styleEngine);
+        SyntaxTheme theme = SyntaxTheme.builder()
+            .token(TokenType.KEYWORD, Style.EMPTY.fg(Color.RED))
+            .build();
+        Rect area = new Rect(0, 0, 30, 3);
+        Buffer buffer = Buffer.empty(area);
+
+        MarkdownElement.of("```java\npublic class Demo {}\n```")
+            .syntaxTheme(theme)
+            .render(Frame.forTesting(buffer), area, context);
+
+        assertThat(buffer.get(1, 1).style().fg()).contains(Color.RED);
     }
 
     @Test

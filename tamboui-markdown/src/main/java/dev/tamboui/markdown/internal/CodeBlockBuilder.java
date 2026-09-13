@@ -19,6 +19,8 @@ import dev.tamboui.widgets.block.BorderType;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.block.Title;
 import dev.tamboui.widgets.paragraph.Paragraph;
+import dev.tamboui.widgets.syntax.SyntaxHighlighter;
+import dev.tamboui.widgets.syntax.SyntaxTheme;
 
 /**
  * Builds a fenced or indented code block as a {@link WidgetChunk} that
@@ -29,9 +31,9 @@ final class CodeBlockBuilder {
     private CodeBlockBuilder() {
     }
 
-    static RenderedChunk build(String literal, String info, int width, MarkdownStyles styles) {
+    static RenderedChunk build(String literal, String info, int width, MarkdownStyles styles,
+                               SyntaxHighlighter highlighter, SyntaxTheme theme) {
         String trimmed = literal.endsWith("\n") ? literal.substring(0, literal.length() - 1) : literal;
-        String[] codeLines = trimmed.isEmpty() ? new String[] {""} : trimmed.split("\n", -1);
 
         Block.Builder blockBuilder = Block.builder()
             .borders(Borders.ALL)
@@ -42,10 +44,7 @@ final class CodeBlockBuilder {
         Block block = blockBuilder.build();
 
         Style codeStyle = styles.codeBlock();
-        List<Line> lines = new ArrayList<>(codeLines.length);
-        for (String codeLine : codeLines) {
-            lines.add(Line.from(Span.styled(codeLine, codeStyle)));
-        }
+        List<Line> lines = highlighter.highlight(trimmed, languageFromInfo(info), codeStyle, theme);
 
         int innerWidth = Math.max(1, width - 2);
         List<Line> wrapped = clip(lines, innerWidth);
@@ -58,6 +57,22 @@ final class CodeBlockBuilder {
             .overflow(Overflow.CLIP)
             .build();
         return new WidgetChunk(paragraph, wrapped.size() + 2);
+    }
+
+    private static String languageFromInfo(String info) {
+        if (info == null) {
+            return null;
+        }
+        String trimmed = info.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < trimmed.length(); i++) {
+            if (Character.isWhitespace(trimmed.charAt(i))) {
+                return trimmed.substring(0, i);
+            }
+        }
+        return trimmed;
     }
 
     private static List<Line> clip(List<Line> lines, int width) {
