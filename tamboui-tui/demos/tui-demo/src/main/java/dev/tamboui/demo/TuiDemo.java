@@ -23,6 +23,10 @@ import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.tui.TuiConfig;
 import dev.tamboui.tui.TuiRunner;
+import dev.tamboui.tui.bindings.Actions;
+import dev.tamboui.tui.bindings.BindingSets;
+import dev.tamboui.tui.bindings.Bindings;
+import dev.tamboui.tui.bindings.KeyTrigger;
 import dev.tamboui.tui.event.Event;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
@@ -79,9 +83,17 @@ public class TuiDemo {
      */
      public void run() throws Exception {
         // Configure with mouse capture and animation ticks at 10 fps
+        // Bind plain F12 to the built-in debug overlay (backend/FPS/runtime popup),
+        // in addition to the default Ctrl+Shift+F12.
+        Bindings bindings = BindingSets.defaults().toBuilder()
+                .bind(KeyTrigger.key(KeyCode.F12), Actions.TOGGLE_DEBUG_OVERLAY)
+                .build();
+
         TuiConfig config = TuiConfig.builder()
                 .mouseCapture(true)
+                .mouseMotion(true)  // deliver hover (MOVE) events, not just drags
                 .tickRate(Duration.ofMillis(100))  // 10 fps for animation
+                .bindings(bindings)
                 .build();
 
         try (TuiRunner tui = TuiRunner.create(config)) {
@@ -184,7 +196,7 @@ public class TuiDemo {
             case PRESS -> "Mouse press " + m.button();
             case RELEASE -> "Mouse release";
             case DRAG -> "Mouse drag " + m.button();
-            case MOVE -> "Mouse move";
+            case MOVE -> "move";
             case SCROLL_UP -> "Scroll up";
             case SCROLL_DOWN -> "Scroll down";
             case SCROLL_LEFT -> "Scroll left";
@@ -321,7 +333,7 @@ public class TuiDemo {
                 Line.empty(),
                 Line.from(Span.raw("  " + posText).cyan()),
                 Line.empty(),
-                Line.from(Span.raw("Click, drag, or scroll").dim()),
+                Line.from(Span.raw("Move, click, drag, or scroll").dim()),
                 Line.from(Span.raw("to see mouse events").dim())
         );
 
@@ -386,6 +398,8 @@ public class TuiDemo {
                 Span.raw(" Select  ").dim(),
                 Span.raw("Scroll").bold().yellow(),
                 Span.raw(" Counter  ").dim(),
+                Span.raw("F12").bold().yellow(),
+                Span.raw(" Debug  ").dim(),
                 Span.raw("q/Ctrl+C").bold().yellow(),
                 Span.raw(" Quit").dim()
         );
