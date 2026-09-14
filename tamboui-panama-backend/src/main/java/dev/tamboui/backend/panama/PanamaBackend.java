@@ -144,9 +144,17 @@ public class PanamaBackend extends AbstractBackend {
 
     @Override
     public void enableMouseCapture() throws IOException {
+        enableMouseCapture(false);
+    }
+
+    @Override
+    public void enableMouseCapture(boolean motion) throws IOException {
         // Enable mouse tracking modes
         outputBuffer.csi().appendAscii("?1000h");  // Normal tracking
         outputBuffer.csi().appendAscii("?1002h");  // Button event tracking
+        if (motion) {
+            outputBuffer.csi().appendAscii("?1003h");  // Any-event tracking (motion without button held)
+        }
         outputBuffer.csi().appendAscii("?1015h");  // urxvt style
         outputBuffer.csi().appendAscii("?1006h");  // SGR extended mode
         flush();
@@ -157,6 +165,9 @@ public class PanamaBackend extends AbstractBackend {
     public void disableMouseCapture() throws IOException {
         outputBuffer.csi().appendAscii("?1006l");
         outputBuffer.csi().appendAscii("?1015l");
+        // Always clear any-event tracking; harmless if it was never enabled, and
+        // mandatory when it was, or the terminal keeps streaming motion after exit.
+        outputBuffer.csi().appendAscii("?1003l");
         outputBuffer.csi().appendAscii("?1002l");
         outputBuffer.csi().appendAscii("?1000l");
         flush();

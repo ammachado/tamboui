@@ -196,8 +196,17 @@ public class AeshBackend extends AbstractBackend {
 
     @Override
     public void enableMouseCapture() throws IOException {
+        enableMouseCapture(false);
+    }
+
+    @Override
+    public void enableMouseCapture(boolean motion) throws IOException {
         MouseTracking.enable(outputBuffer, MouseTracking.Protocol.NORMAL);
         MouseTracking.enable(outputBuffer, MouseTracking.Protocol.BUTTON_MOTION);
+        if (motion) {
+            // Any-event tracking (DECSET 1003): motion without a button held
+            MouseTracking.enable(outputBuffer, MouseTracking.Protocol.ANY_MOTION);
+        }
         MouseTracking.enableEncoding(outputBuffer, MouseTracking.Encoding.URXVT);
         MouseTracking.enableEncoding(outputBuffer, MouseTracking.Encoding.SGR);
         flush();
@@ -208,6 +217,9 @@ public class AeshBackend extends AbstractBackend {
     public void disableMouseCapture() throws IOException {
         MouseTracking.disableEncoding(outputBuffer, MouseTracking.Encoding.SGR);
         MouseTracking.disableEncoding(outputBuffer, MouseTracking.Encoding.URXVT);
+        // Always clear any-event tracking; harmless if it was never enabled, and
+        // mandatory when it was, or the terminal keeps streaming motion after exit.
+        MouseTracking.disable(outputBuffer, MouseTracking.Protocol.ANY_MOTION);
         MouseTracking.disable(outputBuffer, MouseTracking.Protocol.BUTTON_MOTION);
         MouseTracking.disable(outputBuffer, MouseTracking.Protocol.NORMAL);
         flush();
