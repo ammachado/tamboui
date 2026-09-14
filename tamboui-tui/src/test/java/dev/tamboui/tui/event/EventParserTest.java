@@ -104,6 +104,35 @@ class EventParserTest {
     }
 
     @Test
+    @DisplayName("readEvent maps US (char 31) to Ctrl+/")
+    void readEventMapsUsToCtrlSlash() throws IOException {
+        QueueBackend backend = new QueueBackend(31);
+
+        Event event = EventParser.readEvent(backend, 0);
+
+        assertThat(event).isInstanceOf(KeyEvent.class);
+        KeyEvent keyEvent = (KeyEvent) event;
+        assertThat(keyEvent.code()).isEqualTo(KeyCode.CHAR);
+        assertThat(keyEvent.isChar('/')).isTrue();
+        assertThat(keyEvent.hasCtrl()).isTrue();
+    }
+
+    @Test
+    @DisplayName("readEvent maps control chars 28-30 to Ctrl+\\, Ctrl+], Ctrl+^")
+    void readEventMapsFsGsRsToCtrlChars() throws IOException {
+        assertCtrlChar(28, '\\');
+        assertCtrlChar(29, ']');
+        assertCtrlChar(30, '^');
+    }
+
+    private static void assertCtrlChar(int input, char expected) throws IOException {
+        KeyEvent keyEvent = (KeyEvent) EventParser.readEvent(new QueueBackend(input), 0);
+        assertThat(keyEvent.code()).isEqualTo(KeyCode.CHAR);
+        assertThat(keyEvent.isChar(expected)).isTrue();
+        assertThat(keyEvent.hasCtrl()).isTrue();
+    }
+
+    @Test
     @DisplayName("SS3 F4 (ESC O S) is parsed as F4")
     void ss3F4ParsedCorrectly() throws IOException {
         QueueBackend backend = new QueueBackend(27, 'O', 'S');

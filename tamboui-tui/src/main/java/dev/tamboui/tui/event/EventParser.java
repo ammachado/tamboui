@@ -95,6 +95,14 @@ public final class EventParser {
                 return KeyEvent.ofKey(KeyCode.ENTER, bindings); // Enter (LF or CR)
             case 27:
                 return KeyEvent.ofKey(KeyCode.ESCAPE, bindings); // Escape (standalone)
+            case 28:
+                return KeyEvent.ofChar('\\', KeyModifiers.CTRL, bindings); // Ctrl+\ (FS)
+            case 29:
+                return KeyEvent.ofChar(']', KeyModifiers.CTRL, bindings); // Ctrl+] (GS)
+            case 30:
+                return KeyEvent.ofChar('^', KeyModifiers.CTRL, bindings); // Ctrl+^ (RS)
+            case 31:
+                return KeyEvent.ofChar('/', KeyModifiers.CTRL, bindings); // Ctrl+/ (US)
             default:
                 if (c >= 1 && c <= 26) {
                     char letter = (char) ('a' + c - 1);
